@@ -182,38 +182,40 @@ and the same with `-d opcache.jit_buffer_size=0` (opcache on, JIT off).
 
 | Decoding | plain ms (MB/s) | vs `fgetcsv` | messy ms (MB/s) | vs `fgetcsv` |
 |---|---:|---:|---:|---:|
-| `fgetcsv()` loop, collect | 1102 (13) | 1.0x | 1172 (14) | 1.0x |
-| `str_getcsv()` per line, collect | 1084 (13) | 1.0x | n/a (embedded newlines) | |
-| `Decoder` (Lax), collect | 89 (157) | 12.4x | 256 (65) | 4.6x |
-| `Decoder` (Lax), stream | 98 (143) | 11.3x | 252 (66) | 4.7x |
-| `Decoder` (Strict), stream | 106 (132) | 10.4x | 258 (64) | 4.5x |
-| `Decoder` (Lax, `header: true`), stream | 160 (87) | 6.9x | 323 (51) | 3.6x |
+| `fgetcsv()` loop, collect | 1063 (13) | 1.00x | 1137 (15) | 1.00x |
+| `str_getcsv()` per line, collect | 1069 (13) | 0.99x | n/a (embedded newlines) |  |
+| `Decoder` (Lax), collect | 89 (157) | 11.90x | 216 (76) | 5.25x |
+| `Decoder` (Lax), stream | 97 (144) | 10.96x | 225 (73) | 5.05x |
+| `Decoder` (Strict), stream | 103 (136) | 10.33x | 255 (65) | 4.45x |
+| `Decoder` (Lax, `header: true`), stream | 161 (87) | 6.61x | 306 (54) | 3.72x |
 
-| Encoding to `php://memory` | plain ms | messy ms |
-|---|---:|---:|
-| `fputcsv()` loop | 106 | 103 |
-| `Encoder` + `fwrite()` | 154 (0.69x of `fputcsv` speed) | 253 (0.41x) |
+| Encoding to `php://memory` | plain ms | messy ms | numeric (real ints) ms |
+|---|---:|---:|---:|
+| `fputcsv()` loop | 97 | 114 | 74 |
+| `Encoder` + `fwrite()` | 166 (0.59x) | 227 (0.50x) | 78 (0.95x) |
 
 **Without the JIT** (opcache on, `opcache.jit_buffer_size=0`)
 
 | Decoding | plain ms (MB/s) | vs `fgetcsv` | messy ms (MB/s) | vs `fgetcsv` |
 |---|---:|---:|---:|---:|
-| `fgetcsv()` loop, collect | 1064 (13) | 1.0x | 1133 (15) | 1.0x |
-| `str_getcsv()` per line, collect | 1079 (13) | 1.0x | n/a | |
-| `Decoder` (Lax), collect | 116 (120) | 9.2x | 375 (44) | 3.0x |
-| `Decoder` (Lax), stream | 124 (112) | 8.6x | 383 (43) | 3.0x |
-| `Decoder` (Strict), stream | 133 (105) | 8.0x | 426 (39) | 2.7x |
-| `Decoder` (Lax, `header: true`), stream | 189 (74) | 5.6x | 465 (36) | 2.4x |
+| `fgetcsv()` loop, collect | 1070 (13) | 1.00x | 1138 (15) | 1.00x |
+| `str_getcsv()` per line, collect | 1059 (13) | 1.01x | n/a (embedded newlines) |  |
+| `Decoder` (Lax), collect | 117 (120) | 9.17x | 385 (43) | 2.95x |
+| `Decoder` (Lax), stream | 125 (112) | 8.55x | 407 (41) | 2.80x |
+| `Decoder` (Strict), stream | 135 (103) | 7.90x | 452 (37) | 2.52x |
+| `Decoder` (Lax, `header: true`), stream | 192 (73) | 5.57x | 491 (34) | 2.32x |
 
-| Encoding to `php://memory` | plain ms | messy ms |
-|---|---:|---:|
-| `fputcsv()` loop | 100 | 119 |
-| `Encoder` + `fwrite()` | 178 (0.56x) | 362 (0.33x) |
+| Encoding to `php://memory` | plain ms | messy ms | numeric (real ints) ms |
+|---|---:|---:|---:|
+| `fputcsv()` loop | 100 | 118 | 77 |
+| `Encoder` + `fwrite()` | 293 (0.34x) | 364 (0.32x) | 116 (0.66x) |
 
-Without the JIT the numbers differ: the decoder is 30-45% slower than with it, while `fgetcsv()` and `fputcsv()`, which are native code, do not change.
+Without the JIT the numbers differ: the decoder is 30-45% slower and the encoder 40-80% slower than with it, while `fgetcsv()` and `fputcsv()`, which are native code, do not change.
 Your numbers will depend on the PHP build, the CPU and the data; the machine this was measured on was not idle, so differences of 10-15% between runs are noise.
 Timings include building the result arrays, so the cycle collector is part of them (it is why "messy" is slower than its extra bytes suggest).
-`fputcsv()` also encloses fields that contain a space or a tab, so its output is slightly larger than the `Encoder`'s.
+`fputcsv()` also encloses fields that contain a space or a tab, so its output differs from the `Encoder`'s (larger, still valid); the benchmark compares speed only. "numeric (real ints)" is 5 columns of PHP ints, the shape of rows from a database.
+
+Summary: decoding is 2.3-12x faster than `fgetcsv()` (4-12x with the JIT); encoding is on par with `fputcsv()` for rows of ints and 1.7-2x slower for text, because the `Encoder` is PHP and does a per-field check while `fputcsv()` is C.
 
 Why the decoder is fast, and where it stops being fast: a line that contains no enclosure is split with a single `explode()`; lines with quotes go through a
 per-field scanner (`strcspn()` for plain fields, `strpos()` for quoted ones). The more quoted fields, the less of the work happens in one C call.
@@ -224,7 +226,7 @@ Headers cost an `array_combine()` per record.
 
 * Pure PHP: it will not match native code, and I have not measured it against a build of the proposed ext/csv.
 * Quote-heavy data decodes 2-5x faster than `fgetcsv()`, not 10x: the more quoted fields, the less work is done in one C call.
-* The Encoder is faster than `fputcsv()` for numeric rows and slower for text (up to about 1.7x slower on heavily quoted text, see the table); the Decoder is where the time was spent.
+* The Encoder is on par with `fputcsv()` for rows of ints and slower for text (1.7-2x slower, see the table); the Decoder is where the time was spent.
 * Bytes in, bytes out: no charset conversion. UTF-8 is assumed only for the BOM and for `column` in error positions.
 * No comment lines, no escape character, no formula-injection protection (prefixing `=`, `+`, `-`, `@` is up to you).
 * Streams are the caller's job; reading from non-blocking streams needs the caller to skip empty reads.
