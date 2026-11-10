@@ -150,6 +150,7 @@ final class Reader implements \IteratorAggregate
         $names = null;
         $k = null;
         $pieces = [];
+        $cast = [];
         $first = true;
         $given = is_array($this->header) ? $this->checkNames($this->header) : null;
         foreach ($this->chunks($this->dialect->strict, $given === null ? null : count($given)) as $rows) {
@@ -159,28 +160,29 @@ final class Reader implements \IteratorAggregate
                     $names = $given ?? $this->namesFrom(array_shift($rows));
                     $k = count($names);
                 }
+                $cast = $this->resolveCasts($names);
                 if (!$rows) { continue; }
             }
             $k ??= count($rows[0]);
-            if (!$this->dialect->strict) {
-                foreach ($rows as $j => $row) {
-                    $c = count($row);
-                    if ($c !== $k) { $rows[$j] = $c < $k ? array_pad($row, $k, null) : array_slice($row, 0, $k); }
-                }
-            }
             for ($i = 0; $i < $k; $i++) {
-                $pieces[$i][] = array_column($rows, $i);
+                $piece = array_column($rows, $i);
+                if (count($piece) !== count($rows)) { // a short row (strict mode cannot get here): pad lax rows, then redo
+                    foreach ($rows as $j => $row) {
+                        if (count($row) < $k) { $rows[$j] = array_pad($row, $k, null); }
+                    }
+                    $piece = array_column($rows, $i);
+                }
+                if (isset($cast[$i])) { // cast per chunk, so the strings never pile up
+                    $piece = array_map(static fn($v) => $v === null ? null : ($cast[$i])($v), $piece);
+                }
+                $pieces[$i][] = $piece;
             }
         }
-        $cast = $this->resolveCasts($names);
         $out = [];
         for ($i = 0; $i < ($k ?? 0); $i++) {
             $ps = $pieces[$i] ?? [[]];
             unset($pieces[$i]); // keep peak memory at "all columns + one column"
             $col = count($ps) === 1 ? $ps[0] : array_merge(...$ps);
-            if (isset($cast[$i])) {
-                $col = array_map(static fn($v) => $v === null ? null : ($cast[$i])($v), $col);
-            }
             $out[$names[$i] ?? $i] = $col;
         }
         return $out;
