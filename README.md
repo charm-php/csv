@@ -192,7 +192,7 @@ Based on my reading of the RFC text; check the RFC for the final word on ext/csv
 |---|---|---|---|
 | Requires | PHP 8.2+, userspace | PHP core (proposed) | PHP core |
 | RFC 4180 by default, no escape character | yes | yes | no (`\` escape unless disabled) |
-| Locale independent | yes | yes | no (historically) |
+| Locale independent | yes | yes | not guaranteed |
 | Multibyte delimiter / enclosure / terminator | yes | yes | single byte (terminator not configurable) |
 | Rejects ambiguous dialects with `ValueError` | yes | yes | no |
 | Strict and lax parsing | strict throws with line/column/record; lax recovers as documented | strict `ValueError`; lax variant allows ragged rows | lax only |
@@ -247,7 +247,7 @@ php bench/bench.php --rows=50000 --runs=1             # quick run
 
 ## Limitations
 
-* Pure PHP: it will not match native code, and at about 100 MB/s on plain data it is I/O-bound only for slow disks.
+* Pure PHP: it will not match native code.
 * Quote-heavy data is 2-3x faster than `fgetcsv()`, not 8x (see above).
 * A single record is held in memory whole (a 100 MB quoted field needs a 100 MB buffer).
 * Blank lines are skipped, so a single-column file with genuinely empty values must quote them (`""`), as `Writer` does. A row with no fields cannot be represented.
