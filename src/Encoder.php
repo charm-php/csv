@@ -47,10 +47,7 @@ final class Encoder
     private array $tailBad = [];
     private bool $extra;
     private bool $never;
-    private bool $lean;
     private string $E;
-    /** special without the delimiter, which the line-first check counts instead */
-    private string $mask;
     private string $D;
     private string $eol;
     private bool $all;
@@ -80,9 +77,6 @@ final class Encoder
         }
         $this->extra = $this->multi || $f->skipInitialSpace;
         $this->bare = !$f->bom && $header === false;
-        $this->lean = $this->special !== '' && !$this->extra && $f->null === null && $f->quoting === Quoting::Minimal;
-        $this->mask = str_replace($f->delimiter, '', $this->special);
-        if ($this->mask === '') { $this->lean = false; }
         [$this->E, $this->D, $this->eol] = [$f->enclosure, $f->delimiter, $f->eolSequence];
         $this->never = $f->quoting === Quoting::Never;
         $this->all = $f->quoting === Quoting::All;
@@ -100,34 +94,6 @@ final class Encoder
     public function encode(array $row): string
     {
         $pre = $this->bare ? '' : $this->prepare($row);
-        if ($this->lean && $this->started) {
-            // Hot path: Minimal quoting, nothing special about the format, only strings and ints.
-            $n = count($row);
-            foreach ($row as $v) { // implode() would convert floats, bools and null wrongly
-                if (!is_string($v) && !is_int($v)) { return $pre . $this->general($row); }
-            }
-            // Line first: join once, and if no field contains the delimiter, enclosure or a line break, that is the record.
-            $line = implode($this->D, $row);
-            if ($n > 1 && strcspn($line, $this->mask) === strlen($line) && substr_count($line, $this->D) === $n - 1) {
-                return $pre === '' ? $line . $this->eol : $pre . $line . $this->eol;
-            }
-            $single = $n === 1;
-            $special = $this->special;
-            $E = $this->E;
-            foreach ($row as $i => $v) {
-                if (is_string($v)) {
-                    if ($v === '' ? !$single : strcspn($v, $special) === strlen($v)) { continue; }
-                    $row[$i] = $v === '' ? $E . $E : (str_contains($v, $E) ? $E . str_replace($E, $E . $E, $v) . $E : $E . $v . $E);
-                } // ints are joined as they are: they never need enclosing
-            }
-            return $pre === '' ? implode($this->D, $row) . $this->eol : $pre . implode($this->D, $row) . $this->eol;
-        }
-        return $pre . $this->general($row);
-    }
-
-    /** Everything the hot path in encode() does not cover: other types, other quoting modes, the null text, the first row. */
-    private function general(array $row): string
-    {
         $n = count($row);
         $single = $n === 1;
         $special = $this->special;
@@ -140,7 +106,7 @@ final class Encoder
                 $num = $conv = $isNull = false;
             } elseif (is_int($v)) {
                 $bom0 = false;
-                if ($this->all) { $row[$i] = $E . $v . $E; }
+                if ($this->all) { $row[$i] = $E . $v . $E; } // otherwise implode() converts it, and it never needs enclosing
                 continue;
             } else {
                 $num = $isNull = false;
@@ -174,7 +140,7 @@ final class Encoder
                 $row[$i] = $v;
             }
         }
-        return implode($this->D, $row) . $this->eol;
+        return $pre . implode($this->D, $row) . $this->eol;
     }
 
     /** BOM, header record and column order: everything that depends on state between calls. */

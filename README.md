@@ -10,12 +10,14 @@ The `Decoder` is built for speed. It does not loop over characters: `strcspn()`,
 without quotes). See [Performance](#performance) for measured numbers.
 
 The API shape is the one proposed for ext/csv on php internals (a `Format` value object, an `Encoder`, a
-`Decoder`, a `Quoting` enum). Its sibling charm/jsonl has the same
+`Decoder`, a `Quoting` enum). Its sibling [charm/jsonl](https://github.com/charm-php/jsonl) has the same
 method names (`encode()`, `decode()`, `finish()`), without a shared interface.
 
 ```
 composer require charm/csv
 ```
+
+Source: https://github.com/charm-php/csv
 
 ## Usage
 
@@ -105,7 +107,7 @@ final class ParseException extends \RuntimeException {}    // public readonly in
 | `quoting` | `Quoting::Minimal` | `Minimal`; `All`; `NonNumeric` (PHP ints and floats stay bare); `Never` (the Encoder throws `UnexpectedValueException` if a field would need quoting; the Decoder treats quotes as literal text) |
 | `skipInitialSpace` | `false` | Decoding: ignore spaces at the start of a field. The Encoder then encloses fields that start with a space |
 | `bom` | `false` | Encoding: start with a UTF-8 BOM. The Decoder always strips a BOM at the start of the input |
-| `null` | `null` | Text that stands for null, e.g. `'\N'`. The Encoder writes null as this text, the Decoder returns null for fields equal to it. A string equal to it reads back as null, so choose text your data does not contain |
+| `null` | `null` | Text that stands for null, e.g. `'\N'`. The Encoder writes null as this text, and encloses a string equal to it. The Decoder returns null for *unquoted* fields equal to it, so `null`, `''` and the literal text round-trip as three different values. (With an empty null text, a row holding only null is a blank line, which decoders skip) |
 
 A `Format` with empty tokens, or with a delimiter, enclosure or EOL sequence that equals or contains another, or an
 enclosure that overlaps itself, throws `ValueError`. Multibyte tokens are supported (UTF-8 is self-synchronising, so
@@ -150,7 +152,7 @@ O(N²/chunk). Feed chunks of a few KiB or more (the stream loop above uses 64 Ki
 * **Field values.** Strings, ints, floats (written round-trippably and independent of the locale, so `1.0` is `1.0`), `true` as `1`, `false` as `0`, `null`
   as an empty field (or `Format::$null`), and backed enums as their value. Anything else (arrays, resources, pure enums, objects, including `Stringable`) throws `TypeError`.
 * **Enclosing.** A field is enclosed when it contains the delimiter, the enclosure or a line break; when it ends with a fragment of a multibyte token that could combine
-  with the following delimiter or EOL; when it is the only field of a record and empty; when `skipInitialSpace` is on and it starts with a space; and when it is the first field
+  with the following delimiter or EOL; when it is the only field of a record and empty; when `skipInitialSpace` is on and it starts with a space; and when it is equal to `Format::$null`; and when it is the first field
   of the output and starts with a BOM. `All` and `NonNumeric` enclose more; `Never` throws instead of enclosing.
 * **Header.** `true`: the first `encode()` call also emits a header record from that row's keys (the row must be associative). A list: that header is emitted first.
   In both cases later associative rows are written in the header's column order, by key: missing keys become null, keys that are not in the header throw `ValueError`.
@@ -222,7 +224,7 @@ Headers cost an `array_combine()` per record.
 
 * Pure PHP: it will not match native code, and I have not measured it against a build of the proposed ext/csv.
 * Quote-heavy data decodes 2-5x faster than `fgetcsv()`, not 10x: the more quoted fields, the less work is done in one C call.
-* The Encoder is slower than `fputcsv()` (see the table); the Decoder is where the time was spent.
+* The Encoder is faster than `fputcsv()` for numeric rows and slower for text (up to about 1.7x slower on heavily quoted text, see the table); the Decoder is where the time was spent.
 * Bytes in, bytes out: no charset conversion. UTF-8 is assumed only for the BOM and for `column` in error positions.
 * No comment lines, no escape character, no formula-injection protection (prefixing `=`, `+`, `-`, `@` is up to you).
 * Streams are the caller's job; reading from non-blocking streams needs the caller to skip empty reads.
