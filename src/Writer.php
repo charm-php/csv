@@ -16,14 +16,17 @@ namespace FrodeBorli\Csv;
  * Anything else throws TypeError. Floats are written round-trip exact and locale-independent.
  *
  * A field is enclosed if it contains the delimiter, the enclosure or a line break, if it
- * starts/ends with a fragment of a multibyte token that could form a token with its
+ * ends with a fragment of a multibyte token that could form a token with its
  * neighbour, or if it is the only (empty) field of a row (otherwise the row would read back as a blank line).
- * With skipInitialSpace, fields starting with a space are enclosed too.
+ * With skipInitialSpace, fields starting with a space are enclosed too. So is a very first field starting with a UTF-8 BOM,
+ * which a reader would otherwise strip.
+ * An empty row (no fields) is written as a blank line, which readers skip.
  */
 final class Writer
 {
     private string $buf = '';
     private bool $closed = false;
+    private bool $started = false;
     /** @var list<int|string>|null */
     private ?array $header = null;
 
@@ -31,8 +34,6 @@ final class Writer
     private string $special;
     /** @var list<string> multibyte tokens that must not occur in an unquoted field */
     private array $multi = [];
-    /** @var list<string> */
-    private array $headBad = [];
     /** @var list<string> */
     private array $tailBad = [];
     private bool $extra;
@@ -53,11 +54,12 @@ final class Writer
             if (strlen($t) === 1) { $this->special .= $t; }
             elseif ($t !== "\r\n") { $this->multi[] = $t; }
         }
-        // Fragments of multibyte tokens at a field's edge could combine with the neighbouring token.
+        // A field ending in a proper prefix of a multibyte token could form that token together with the
+        // delimiter or terminator that follows ("a|" + "||" reads as "a" + "||" + "|"). A fragment at the
+        // start of a field is harmless: readers match tokens left to right, from a known position.
         foreach ($this->multi as $t) {
             for ($k = 1; $k < strlen($t); $k++) {
                 $this->tailBad[] = substr($t, 0, $k);
-                $this->headBad[] = substr($t, -$k);
             }
         }
         $this->extra = $this->multi || $d->skipInitialSpace;
@@ -202,6 +204,10 @@ final class Writer
             $need = $v === ''
                 ? $single
                 : (strcspn($v, $this->special) !== strlen($v) || ($this->extra && $this->needsMore($v)));
+            if (!$this->started) { // a leading BOM would be swallowed by the reader
+                $this->started = true;
+                $need = $need || str_starts_with($v, "\xEF\xBB\xBF");
+            }
             if ($need && $mode === Quoting::NONE) {
                 throw new \UnexpectedValueException('Field needs quoting but the dialect has Quoting::NONE: ' . ($v === '' ? '(single empty field)' : var_export($v, true)));
             }
@@ -216,14 +222,11 @@ final class Writer
         }
     }
 
-    /** The less common reasons to enclose a field: multibyte tokens, edge fragments, leading space. */
+    /** The less common reasons to enclose a field: multibyte tokens, a dangling token prefix, leading space. */
     private function needsMore(string $v): bool
     {
         foreach ($this->multi as $t) {
             if (str_contains($v, $t)) { return true; }
-        }
-        foreach ($this->headBad as $t) {
-            if (str_starts_with($v, $t)) { return true; }
         }
         foreach ($this->tailBad as $t) {
             if (str_ends_with($v, $t)) { return true; }
