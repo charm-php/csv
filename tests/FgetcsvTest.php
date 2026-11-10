@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Charm\Csv\Tests;
 
-use Charm\Csv\Reader;
+use Charm\Csv\Decoder;
+use Charm\Csv\Mode;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -28,23 +29,36 @@ final class FgetcsvTest extends TestCase
         fclose($h);
         $this->assertGreaterThan(1000, count($expected));
 
-        $this->assertSame($expected, Reader::fromFile($file)->toArray());
+        $csv = file_get_contents($file);
+        $this->assertSame($expected, Support::decode($csv));
         foreach ([1 << 10, 4099, 1 << 16] as $chunk) {
-            $this->assertSame($expected, Reader::fromFile($file)->withChunkSize($chunk)->toArray(), "chunk $chunk");
+            $this->assertSame($expected, Support::decode($csv, null, false, Mode::Lax, $chunk), "chunk $chunk");
         }
-        $this->assertSame($expected, Reader::fromString(file_get_contents($file))->toArray());
+        // the same through a real stream, the way the README does it
+        $h = fopen($file, 'rb');
+        $decoder = new Decoder(mode: Mode::Lax);
+        $rows = [];
+        while (!feof($h)) {
+            foreach ($decoder->decode(fread($h, 8192)) as $row) { $rows[] = $row; }
+        }
+        array_push($rows, ...$decoder->finish());
+        fclose($h);
+        $this->assertSame($expected, $rows);
     }
 
-    public function testFixturesAreWellFormedForTheStrictReader(): void
+    public function testFixturesAreWellFormedForStrictMode(): void
     {
-        $this->assertNotEmpty(Reader::fromFile(__DIR__ . '/fixtures/messy-sample.csv', new \Charm\Csv\Dialect(strict: true))->toArray());
+        $csv = file_get_contents(__DIR__ . '/fixtures/messy-sample.csv');
+        $this->assertNotEmpty(Support::decode($csv, null, false, Mode::Strict));
     }
 
-    public function testColumnsAreTheTransposedRows(): void
+    public function testHeaderRowsAgreeWithFgetcsvAndArrayCombine(): void
     {
-        $file = __DIR__ . '/fixtures/plain-sample.csv';
-        $rows = Reader::fromFile($file)->toArray();
-        $cols = Reader::fromFile($file)->withChunkSize(4096)->columns();
-        $this->assertSame(array_map(null, ...$rows), $cols);
+        $h = fopen(__DIR__ . '/fixtures/plain-sample.csv', 'rb');
+        $names = fgetcsv($h, null, ',', '"', '');
+        $expected = [];
+        while (($row = fgetcsv($h, null, ',', '"', '')) !== false) { $expected[] = array_combine($names, $row); }
+        fclose($h);
+        $this->assertSame($expected, Support::decode(file_get_contents(__DIR__ . '/fixtures/plain-sample.csv'), null, true, Mode::Strict, 5000));
     }
 }

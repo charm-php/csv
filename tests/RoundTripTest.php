@@ -4,77 +4,101 @@ declare(strict_types=1);
 
 namespace Charm\Csv\Tests;
 
-use Charm\Csv\Dialect;
+use Charm\Csv\Decoder;
+use Charm\Csv\Encoder;
+use Charm\Csv\Format;
+use Charm\Csv\Mode;
 use Charm\Csv\Quoting;
-use Charm\Csv\Reader;
-use Charm\Csv\Writer;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-/** read(write(rows)) === rows, for any rows of strings with at least one field. */
+/** decode(encode(rows)) === rows, for any rows of strings with at least one field. */
 final class RoundTripTest extends TestCase
 {
-    public static function dialects(): iterable
+    public static function formats(): iterable
     {
         $bom = "\xEF\xBB\xBF";
         $text = ['a', 'b', 'é', ' ', '  ', "\0", $bom, '0', '1.5'];
-        yield 'rfc4180' => [new Dialect(), [...$text, ',', '"', '""', "\r\n", "\n", "\r", ',"', "\r", "\n\n"]];
-        yield 'rfc4180, ALL' => [new Dialect(quoting: Quoting::ALL), [...$text, ',', '"', "\r\n", "\n"]];
-        yield 'rfc4180, NONNUMERIC' => [new Dialect(quoting: Quoting::NONNUMERIC), [...$text, ',', '"', "\n"]];
-        yield 'excel' => [Dialect::excel(), [...$text, ',', '"', "\r\n"]];
-        yield 'unix' => [Dialect::unix(), [...$text, ',', '"', "\r\n", "\n"]];
-        yield 'semicolon' => [new Dialect(';', "'", "\n"), [...$text, ';', "'", '"', ',', "\n", "\r"]];
-        yield 'skipInitialSpace' => [new Dialect(skipInitialSpace: true), [...$text, ',', '"', ' a', "\n"]];
-        yield 'tsv (NONE)' => [Dialect::tsv(), [...$text, ',', '"', "'", '\\']];
-        yield 'multibyte' => [new Dialect('→', '«', '¶'), [...$text, '→', '«', '¶', "\n", "\xE2", "\x86", "\xC2", "\xB6", '→→']];
-        yield 'two-byte delimiter' => [new Dialect('::', '[]', "\n"), [...$text, '::', ':', '[]', '[', ']', "\n", "\r\n"]];
-        yield 'self-overlapping delimiter' => [new Dialect('||', "'", "\r\n"), [...$text, '||', '|', '|||', "'", "''", "\r\n", "\n"]];
-        yield 'custom terminator' => [new Dialect(',', '"', '<>'), [...$text, ',', '"', '<>', '<', '>', "\n", '<<>>']];
-        yield 'multibyte delimiter and terminator, NONE' => [new Dialect('::', '"', '<>', Quoting::NONE), [...$text, ':', '<', '>', '::', '<>']];
-        yield 'CR terminator' => [new Dialect(',', '"', "\r"), [...$text, ',', '"', "\r", "\n", "\r\n"]];
-        yield 'NUL delimiter' => [new Dialect("\0", '"', "\n"), [...$text, "\0", '"', "\n"]];
+        yield 'rfc4180' => [new Format(), [...$text, ',', '"', '""', "\r\n", "\n", "\r", ',"', "\r", "\n\n"]];
+        yield 'rfc4180, All' => [new Format(quoting: Quoting::All), [...$text, ',', '"', "\r\n", "\n"]];
+        yield 'rfc4180, NonNumeric' => [new Format(quoting: Quoting::NonNumeric), [...$text, ',', '"', "\n"]];
+        yield 'excel' => [Format::excel(), [...$text, ',', '"', "\r\n"]];
+        yield 'unix' => [Format::unix(), [...$text, ',', '"', "\r\n", "\n"]];
+        yield 'semicolon' => [new Format(';', "'", "\n"), [...$text, ';', "'", '"', ',', "\n", "\r"]];
+        yield 'skipInitialSpace' => [new Format(skipInitialSpace: true), [...$text, ',', '"', ' a', "\n"]];
+        yield 'tsv (Never)' => [Format::tsv(), [...$text, ',', '"', "'", '\\']];
+        yield 'multibyte' => [new Format('→', '«', '¶'), [...$text, '→', '«', '¶', "\n", "\xE2", "\x86", "\xC2", "\xB6", '→→']];
+        yield 'two-byte delimiter' => [new Format('::', '[]', "\n"), [...$text, '::', ':', '[]', '[', ']', "\n", "\r\n"]];
+        yield 'self-overlapping delimiter' => [new Format('||', "'", "\r\n"), [...$text, '||', '|', '|||', "'", "''", "\r\n", "\n"]];
+        yield 'custom EOL' => [new Format(',', '"', '<>'), [...$text, ',', '"', '<>', '<', '>', "\n", '<<>>']];
+        yield 'multibyte delimiter and EOL, Never' => [new Format('::', '"', '<>', Quoting::Never), [...$text, ':', '<', '>', '::', '<>']];
+        yield 'CR EOL' => [new Format(',', '"', "\r"), [...$text, ',', '"', "\r", "\n", "\r\n"]];
+        yield 'NUL delimiter' => [new Format("\0", '"', "\n"), [...$text, "\0", '"', "\n"]];
+        yield 'null text' => [new Format(null: '\N'), [...$text, ',', '"', '\\', 'N', "\n"]];
     }
 
-    #[DataProvider('dialects')]
-    public function testRandomRowsSurviveAWriteReadCycle(Dialect $d, array $alphabet): void
+    #[DataProvider('formats')]
+    public function testRandomRowsSurviveAnEncodeDecodeCycle(Format $f, array $alphabet): void
     {
         mt_srand(20261110);
         for ($i = 0; $i < 150; $i++) {
             $rows = [];
             for ($r = mt_rand(1, 12); $r > 0; $r--) {
                 $row = [];
-                for ($f = mt_rand(1, 5); $f > 0; $f--) {
+                for ($c = mt_rand(1, 5); $c > 0; $c--) {
                     $v = '';
                     for ($k = mt_rand(0, 4); $k > 0; $k--) { $v .= $alphabet[mt_rand(0, count($alphabet) - 1)]; }
+                    if ($f->null !== null && $v === $f->null) { $v .= 'x'; } // documented: such a string reads back as null
                     $row[] = $v;
                 }
                 $rows[] = $row;
             }
-            // Quoting::NONE can only represent fields that are free of delimiters and line breaks.
-            $csv = null;
             try {
-                $csv = Writer::rowsToString($rows, $d);
-            } catch (\UnexpectedValueException) {
-                $this->assertSame(Quoting::NONE, $d->quoting);
+                $csv = Support::encode($rows, $f);
+            } catch (\UnexpectedValueException) { // Quoting::Never can only represent fields free of delimiters and line breaks
+                $this->assertSame(Quoting::Never, $f->quoting);
                 continue;
             }
             $label = json_encode($rows, JSON_INVALID_UTF8_SUBSTITUTE);
             $chunk = mt_rand(1, 12);
-            $this->assertSame($rows, Reader::fromString($csv, $d)->toArray(), $label);
-            $this->assertSame($rows, Reader::fromString($csv, $d)->withChunkSize($chunk)->toArray(), "chunk $chunk, $label");
-            // Writer output is always valid for the strict reader (NONE has no quoting to violate).
-            $this->assertSame($rows, Reader::fromString($csv, $d->with(strict: true))->withChunkSize($chunk)->toArray(), "strict, $label");
+            $this->assertSame($rows, Support::decode($csv, $f), $label);
+            $this->assertSame($rows, Support::decode($csv, $f, false, Mode::Lax, $chunk), "chunk $chunk, $label");
+            // The Encoder's output is always valid for the strict Decoder, but ragged rows are not, so pad them.
+            $w = max(array_map('count', $rows));
+            $square = array_map(fn($r) => array_pad($r, $w, 'p'), $rows);
+            $this->assertSame($square, Support::decode(Support::encode($square, $f), $f, false, Mode::Strict, $chunk), "strict, $label");
         }
     }
 
-    public function testNoneDialectRoundTripsWhenFieldsAreClean(): void
+    public function testNeverFormatRoundTripsWhenFieldsAreClean(): void
     {
-        $rows = [['a', 'b"c', "'x'"], ['', ''], ['é', "\0"]];
-        $d = Dialect::tsv();
-        $this->assertSame($rows, Reader::fromString(Writer::rowsToString($rows, $d), $d)->toArray());
+        $rows = [['a', 'b"c', "'x'"], ['é', "\0", 'z'], ['y', 'y', 'y']];
+        $f = Format::tsv();
+        $this->assertSame($rows, Support::decode(Support::encode($rows, $f), $f, false, Mode::Strict));
     }
 
-    public function testStreamRoundTripWithSmallBuffersAndChunks(): void
+    public function testMixedTypesComeBackAsStringsAndNullsWithANullText(): void
+    {
+        $f = new Format(null: '\N');
+        $csv = Support::encode([[1, 2.5, true, false, null, '', 'x']], $f);
+        $this->assertSame("1,2.5,1,0,\\N,,x\r\n", $csv);
+        $this->assertSame([['1', '2.5', '1', '0', null, '', 'x']], Support::decode($csv, $f, false, Mode::Strict));
+    }
+
+    public function testHeaderedRoundTrip(): void
+    {
+        mt_srand(99);
+        $rows = [];
+        for ($i = 0; $i < 300; $i++) {
+            $rows[] = ['id' => (string) $i, 'note' => str_repeat('x,"', mt_rand(0, 3)) . "\n" . mt_rand(0, 9), 'empty' => ''];
+        }
+        $csv = Support::encode($rows, null, true);
+        foreach ([0, 1, 7, 100] as $chunk) {
+            $this->assertSame($rows, Support::decode($csv, null, true, Mode::Strict, $chunk), "chunk $chunk");
+        }
+    }
+
+    public function testStreamRoundTripWithSmallChunks(): void
     {
         mt_srand(7);
         $rows = [];
@@ -82,10 +106,15 @@ final class RoundTripTest extends TestCase
             $rows[] = [(string) $i, str_repeat('x', mt_rand(0, 30)) . ($i % 7 ? '' : "\n,\""), $i % 3 ? 'plain' : 'with "quotes"'];
         }
         $h = fopen('php://memory', 'w+');
-        $w = Writer::toStream($h, null, 64);
-        $w->writeRows($rows);
-        $w->close();
+        $encoder = new Encoder();
+        foreach ($rows as $row) { fwrite($h, $encoder->encode($row)); }
         rewind($h);
-        $this->assertSame($rows, Reader::fromStream($h)->withChunkSize(13)->toArray());
+        $decoder = new Decoder();
+        $out = [];
+        while (!feof($h)) {
+            foreach ($decoder->decode(fread($h, 13)) as $row) { $out[] = $row; }
+        }
+        array_push($out, ...$decoder->finish());
+        $this->assertSame($rows, $out);
     }
 }

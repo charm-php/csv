@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Charm\Csv;
 
 /**
- * The parsing engine. Not public API; use Reader.
+ * The parsing engine behind the Decoder. Not public API.
  *
  * scan() parses as many complete records as the buffer holds. It never loops per character:
  * strcspn() finds the end of a plain field, strpos() the next enclosure of a quoted one.
@@ -36,23 +36,25 @@ final class Scanner
     private bool $std;
     private bool $quote;
     private bool $strict;
+    private bool $check;
     private bool $skip;
     private string $stops = '';
     /** @var list<string> multibyte delimiter / terminator */
     private array $multi = [];
     private int $peek;
 
-    public function __construct(Dialect $d, private bool $check = false)
+    public function __construct(Format $d, bool $strict = false)
     {
         $this->D = $d->delimiter;
         $this->E = $d->enclosure;
-        $this->X = $d->lineTerminator;
+        $this->X = $d->eolSequence;
         $this->Ld = strlen($this->D);
         $this->Le = strlen($this->E);
         $this->Lx = strlen($this->X);
         $this->std = $d->universalEol();
-        $this->quote = $d->quoting !== Quoting::NONE;
-        $this->strict = $d->strict;
+        $this->quote = $d->quoting !== Quoting::Never;
+        $this->strict = $strict;
+        $this->check = $strict; // strict mode also demands equal field counts
         $this->skip = $d->skipInitialSpace;
         if ($this->Ld === 1) { $this->stops .= $this->D; } else { $this->multi[] = $this->D; }
         if ($this->std) { $this->stops .= "\r\n"; }
@@ -99,7 +101,7 @@ final class Scanner
                 }
                 if ($quote && $nq < $p) { $f = strpos($s, $E, $p); $nq = $f === false ? PHP_INT_MAX : $f; }
                 if ($nq > $le) {
-                    if ($le > $lim) {
+                    if ($le > $lim && !($std && ($s[$le] ?? '') === "\n")) { // a "\n" is a complete terminator even with nothing after it
                         if (!$final) { $p = $rs; goto done; }
                         $row = explode($D, substr($s, $p, $le - $p));
                         $p = $n;
@@ -132,7 +134,7 @@ final class Scanner
                         }
                         $val .= substr($s, $p, $q - $p);
                         $p = $q + $Le;
-                        if (!$final && $p > $lim) { $p = $rs; goto done; } // cannot tell "" from a closing quote yet
+                        if (!$final && $p > $lim && !($std && ($s[$p] ?? '') === "\n")) { $p = $rs; goto done; } // cannot tell "" from a closing quote yet
                         if ($Le === 1 ? ($s[$p] ?? '') === $E : substr_compare($s, $E, $p, $Le) === 0) {
                             $val .= $E;
                             $p += $Le;
@@ -155,7 +157,7 @@ final class Scanner
                     }
                     $p = $end;
                 }
-                if ($p > $lim) {
+                if ($p > $lim && !($std && ($s[$p] ?? '') === "\n")) {
                     if (!$final) { $p = $rs; goto done; }
                     $row[] = $val; // end of input ends the record
                     break;

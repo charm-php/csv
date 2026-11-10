@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Charm\Csv\Tests;
 
-use Charm\Csv\Dialect;
+use Charm\Csv\Format;
 use Charm\Csv\Quoting;
 
 /**
@@ -13,12 +13,12 @@ use Charm\Csv\Quoting;
  */
 final class ReferenceParser
 {
-    /** @return array{0: list<list<string>>, 1: bool} rows, and whether the input violates the strict grammar */
-    public static function parse(string $s, Dialect $d): array
+    /** @return array{0: list<list<string>>, 1: bool} rows, and whether the input violates the strict grammar (field counts are not checked here) */
+    public static function parse(string $s, Format $d): array
     {
         if (str_starts_with($s, "\xEF\xBB\xBF")) { $s = substr($s, 3); }
         $D = $d->delimiter; $E = $d->enclosure; $eols = $d->eols();
-        $quote = $d->quoting !== Quoting::NONE;
+        $quote = $d->quoting !== Quoting::Never;
         $n = strlen($s);
         $eolAt = function (int $p) use ($s, $eols): int {
             foreach ($eols as $e) { if (substr($s, $p, strlen($e)) === $e) { return strlen($e); } }

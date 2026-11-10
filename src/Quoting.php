@@ -5,18 +5,18 @@ declare(strict_types=1);
 namespace Charm\Csv;
 
 /**
- * When the writer encloses a field.
+ * When the Encoder encloses a field.
  *
- * On reading, NONE also means "the enclosure is not special": quotes are literal text.
+ * On decoding, Never also means "the enclosure is not special": quotes are literal text.
  */
 enum Quoting
 {
     /** Only fields that need it (contain a delimiter, enclosure or line break, ...). */
-    case MINIMAL;
+    case Minimal;
     /** Every field. */
-    case ALL;
+    case All;
     /** Every field except PHP ints and floats. Numeric strings are still quoted. */
-    case NONNUMERIC;
-    /** Never. The writer throws if a field would need quoting. */
-    case NONE;
+    case NonNumeric;
+    /** Never. The Encoder throws if a field would need quoting. */
+    case Never;
 }
