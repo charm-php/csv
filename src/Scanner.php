@@ -92,7 +92,7 @@ final class Scanner
             $rs = $p;
             if ($lines) {
                 // Fast path: a line without any enclosure holds no quoted field, so explode() splits it in one C call.
-                $le = $p + strcspn($s, $eolStops, $p);
+                $le = $eolStops === '' ? $n : $p + strcspn($s, $eolStops, $p); // (strcspn with an empty mask stops at NUL before PHP 8.4)
                 if ($xm) {
                     if ($nx < $p) { $f = strpos($s, $X, $p); $nx = $f === false ? PHP_INT_MAX : $f; }
                     if ($nx < $le) { $le = $nx; }
@@ -192,7 +192,7 @@ final class Scanner
     /** End of a plain field starting at $p when a multibyte delimiter/terminator is in play. */
     private function stop(string $s, int $p, array &$next): int
     {
-        $end = $p + strcspn($s, $this->stops, $p);
+        $end = $this->stops === '' ? strlen($s) : $p + strcspn($s, $this->stops, $p);
         foreach ($this->multi as $i => $t) {
             if ($next[$i] < $p) {
                 $f = strpos($s, $t, $p);

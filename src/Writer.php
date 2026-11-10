@@ -203,7 +203,7 @@ final class Writer
             }
             $need = $v === ''
                 ? $single
-                : (strcspn($v, $this->special) !== strlen($v) || ($this->extra && $this->needsMore($v)));
+                : (($this->special !== '' && strcspn($v, $this->special) !== strlen($v)) || ($this->extra && $this->needsMore($v))); // (empty mask: see Scanner)
             if (!$this->started) { // a leading BOM would be swallowed by the reader
                 $this->started = true;
                 $need = $need || str_starts_with($v, "\xEF\xBB\xBF");

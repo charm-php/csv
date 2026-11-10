@@ -72,6 +72,12 @@ final class WriterTest extends TestCase
         Writer::rowToString(["a\tb"], Dialect::tsv());
     }
 
+    public function testNulInFieldsWithEmptyTokenMask(): void
+    {
+        $d = new Dialect('::', '"', '<>', Quoting::NONE); // no single-byte token at all
+        $this->assertSame("a\0b::c<>", Writer::rowToString(["a\0b", 'c'], $d));
+    }
+
     public function testFieldTypes(): void
     {
         $s = new class implements \Stringable { public function __toString(): string { return 'str,able'; } };

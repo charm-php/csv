@@ -54,6 +54,15 @@ final class ReaderTest extends TestCase
         yield 'ragged rows' => ["a,b,c\n1\n1,2,3,4", [['a', 'b', 'c'], ['1'], ['1', '2', '3', '4']]];
     }
 
+    /** Regression: before PHP 8.4, strcspn() with an empty mask stops at the first NUL byte. */
+    public function testNulBytesWithMultibyteDelimiterAndTerminator(): void
+    {
+        $d = new Dialect('::', '"', '<>');
+        $this->assertSame([["a\0b", "c\0"], ["\0", "<"]], self::read("a\0b::c\0<>\0::<", $d));
+        $this->assertSame([["<\0"]], self::read("<\0", new Dialect(',', '"', '<>')));
+        $this->assertSame([["a\0b", 'c']], self::read("a\0b::\"c\"", $d));
+    }
+
     public function testSpaceBeforeQuoteIsOnlyLaxlyAccepted(): void
     {
         $this->expectException(ParseException::class);

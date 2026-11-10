@@ -181,7 +181,7 @@ row and empty, when `skipInitialSpace` is on and it starts with a space, and whe
 `Quoting::NONE` throws `UnexpectedValueException` in those cases rather than writing something that cannot be read back.
 
 **Round trip:** for any list of rows, each with at least one string field, `read(write(rows)) === rows` in every dialect (with `NONE`:
-whenever the writer accepts the rows). This is checked with a seeded property test over 14 dialects, including multibyte and
+whenever the writer accepts the rows). This is checked with a seeded property test over 15 dialects, including multibyte and
 self-overlapping tokens, many chunk sizes, in lax and strict mode. A row with no fields is written as a blank line, which readers skip.
 
 ## Compared with ext/csv and fgetcsv

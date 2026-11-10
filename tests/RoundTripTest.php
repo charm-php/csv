@@ -30,6 +30,7 @@ final class RoundTripTest extends TestCase
         yield 'two-byte delimiter' => [new Dialect('::', '[]', "\n"), [...$text, '::', ':', '[]', '[', ']', "\n", "\r\n"]];
         yield 'self-overlapping delimiter' => [new Dialect('||', "'", "\r\n"), [...$text, '||', '|', '|||', "'", "''", "\r\n", "\n"]];
         yield 'custom terminator' => [new Dialect(',', '"', '<>'), [...$text, ',', '"', '<>', '<', '>', "\n", '<<>>']];
+        yield 'multibyte delimiter and terminator, NONE' => [new Dialect('::', '"', '<>', Quoting::NONE), [...$text, ':', '<', '>', '::', '<>']];
         yield 'CR terminator' => [new Dialect(',', '"', "\r"), [...$text, ',', '"', "\r", "\n", "\r\n"]];
         yield 'NUL delimiter' => [new Dialect("\0", '"', "\n"), [...$text, "\0", '"', "\n"]];
     }
