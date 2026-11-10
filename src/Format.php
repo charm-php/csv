@@ -17,6 +17,7 @@ namespace Charm\Csv;
  */
 final readonly class Format
 {
+    /** @throws \ValueError if a token is empty, a token equals or contains another, or the enclosure overlaps itself */
     public function __construct(
         public string $delimiter = ',',
         public string $enclosure = '"',
@@ -99,7 +100,10 @@ final readonly class Format
         return $this->eolSequence === "\r\n" || $this->eolSequence === "\n" || $this->eolSequence === "\r";
     }
 
-    /** @internal @return list<string> the EOL sequences recognised when decoding */
+    /**
+     * @internal
+     * @return list<string> the EOL sequences recognised when decoding
+     */
     public function eols(): array
     {
         return $this->universalEol() ? ["\r\n", "\n", "\r"] : [$this->eolSequence];
