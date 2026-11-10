@@ -124,7 +124,7 @@ final class Encoder
             $all = $this->all;
             $need = $v === ''
                 ? $single
-                : (($special !== '' && strcspn($v, $special) !== strlen($v)) || ($this->extra && $this->needsMore($v))); // (an empty mask stops at NUL before PHP 8.4; see Scanner)
+                : (($special !== '' && strpbrk($v, $special) !== false) || ($this->extra && $this->needsMore($v))); // (strpbrk() rejects an empty list)
             if ($bom0) {
                 $bom0 = false;
                 $need = $need || str_starts_with($v, "\xEF\xBB\xBF");
