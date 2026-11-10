@@ -34,6 +34,8 @@ final class Encoder
 {
     private bool $started = false;
     private bool $bomSent = false;
+    /** No BOM and no header: encode() is just record(). */
+    private bool $bare;
     /** @var list<int|string>|null */
     private ?array $names;
 
@@ -72,6 +74,7 @@ final class Encoder
             }
         }
         $this->extra = $this->multi || $f->skipInitialSpace;
+        $this->bare = !$f->bom && $header === false;
         $this->never = $f->quoting === Quoting::Never;
         $this->all = $f->quoting === Quoting::All;
         $this->nonNumeric = $f->quoting === Quoting::NonNumeric;
@@ -92,6 +95,9 @@ final class Encoder
      */
     public function encode(array $row): string
     {
+        if ($this->bare) {
+            return $this->record($row);
+        }
         $out = '';
         if (!$this->bomSent && $this->format->bom) {
             $out = "\xEF\xBB\xBF";
