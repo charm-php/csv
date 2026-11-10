@@ -1,0 +1,21 @@
+{
+    "name": "frodeborli/csv",
+    "description": "A fast, RFC 4180 CSV reader and writer in userspace PHP: lazy streaming, strict/lax parsing, multibyte dialects, row/associative/column-major output.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["csv", "rfc4180", "parser", "streaming", "tsv"],
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5"
+    },
+    "autoload": {
+        "psr-4": { "FrodeBorli\\Csv\\": "src/" },
+        "files": ["src/functions.php"]
+    },
+    "autoload-dev": {
+        "psr-4": { "FrodeBorli\\Csv\\Tests\\": "tests/" }
+    },
+    "config": { "sort-packages": true }
+}
