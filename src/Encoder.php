@@ -43,6 +43,11 @@ final class Encoder
     /** @var list<string> */
     private array $tailBad = [];
     private bool $extra;
+    private bool $never;
+    private bool $all;
+    private bool $nonNumeric;
+    private bool $plain;
+    private string $mask;
 
     /** @param bool|list<int|string> $header true: header from the first row's keys; list: write this header first */
     public function __construct(private Format $format = new Format(), private bool|array $header = false)
@@ -67,6 +72,14 @@ final class Encoder
             }
         }
         $this->extra = $this->multi || $f->skipInitialSpace;
+        $this->never = $f->quoting === Quoting::Never;
+        $this->all = $f->quoting === Quoting::All;
+        $this->nonNumeric = $f->quoting === Quoting::NonNumeric;
+        // The fast path in record() needs: minimal quoting, single-byte tokens only, nothing special about spaces.
+        $this->plain = $f->quoting === Quoting::Minimal && !$this->extra && strlen($f->delimiter) === 1 && strlen($f->enclosure) === 1
+            && $this->special !== '';
+        $this->mask = str_replace($f->delimiter, '', $this->special); // the delimiter is counted separately
+        if ($this->mask === '') { $this->plain = false; }
     }
 
     /**
@@ -109,15 +122,38 @@ final class Encoder
     private function record(array $row): string
     {
         $f = $this->format;
+        $n = count($row);
+        $checkBom = !$this->started && $n > 0; // a leading BOM would be swallowed by the decoder
+        if ($checkBom) { $this->started = true; }
+        if ($this->plain && !$checkBom && $n > 1) {
+            // Fast path for the common case: only strings, and none of them needs enclosing. The delimiter
+            // count of the joined row tells whether a field contains one; one strcspn() covers the rest.
+            foreach ($row as $v) {
+                if (!is_string($v)) { goto slow; }
+            }
+            $s = implode($f->delimiter, $row);
+            if (strcspn($s, $this->mask) === strlen($s) && substr_count($s, $f->delimiter) === $n - 1) {
+                return $s . $f->eolSequence;
+            }
+            $E = $f->enclosure;
+            $out = [];
+            foreach ($row as $v) {
+                $out[] = strcspn($v, $this->special) === strlen($v) ? $v : $E . str_replace($E, $E . $E, $v) . $E;
+            }
+            return implode($f->delimiter, $out) . $f->eolSequence;
+        }
+        slow:
         $E = $f->enclosure;
-        $mode = $f->quoting;
-        $single = count($row) === 1;
+        $single = $n === 1;
         $out = [];
         foreach ($row as $v) {
-            $num = false;
-            if ($v instanceof \BackedEnum) { $v = $v->value; }
-            if (!is_string($v)) {
-                if (is_int($v)) { $num = true; $v = (string) $v; }
+            if (is_string($v)) {
+                $num = false;
+            } else {
+                if ($v instanceof \BackedEnum) { $v = $v->value; }
+                $num = false;
+                if (is_string($v)) { /* a string-backed enum */ }
+                elseif (is_int($v)) { $num = true; $v = (string) $v; }
                 elseif (is_float($v)) { $num = true; $v = var_export($v, true); }
                 elseif ($v === null) { $v = $f->null ?? ''; }
                 elseif (is_bool($v)) { $v = $v ? '1' : '0'; }
@@ -126,14 +162,14 @@ final class Encoder
             $need = $v === ''
                 ? $single
                 : (($this->special !== '' && strcspn($v, $this->special) !== strlen($v)) || ($this->extra && $this->needsMore($v))); // (an empty mask stops at NUL before PHP 8.4; see Scanner)
-            if (!$this->started) { // a leading BOM would be swallowed by the decoder
-                $this->started = true;
+            if ($checkBom) {
+                $checkBom = false;
                 $need = $need || str_starts_with($v, "\xEF\xBB\xBF");
             }
-            if ($need && $mode === Quoting::Never) {
+            if ($need && $this->never) {
                 throw new \UnexpectedValueException('Field needs quoting but the format has Quoting::Never: ' . ($v === '' ? '(single empty field)' : var_export($v, true)));
             }
-            if ($need || $mode === Quoting::All || ($mode === Quoting::NonNumeric && !$num)) {
+            if ($need || $this->all || ($this->nonNumeric && !$num)) {
                 $v = $E . str_replace($E, $E . $E, $v) . $E;
             }
             $out[] = $v;
