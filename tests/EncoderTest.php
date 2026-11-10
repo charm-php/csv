@@ -120,6 +120,8 @@ final class EncoderTest extends TestCase
     {
         $this->assertSame("a,,\r\n", self::row(['a', null, '']), 'default: an empty field');
         $this->assertSame("a,\\N,\r\n", self::row(['a', null, ''], new Format(null: '\N')));
+        $this->assertSame("\"\\N\",\\N\r\n", self::row(['\N', null], new Format(null: '\N')), 'the literal text is enclosed');
+        $this->assertSame("\"\",x\r\n", self::row(['', 'x'], new Format(null: '')), 'with an empty null text, "" is the empty string');
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('unsupported')]

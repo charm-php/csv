@@ -48,7 +48,6 @@ final class RoundTripTest extends TestCase
                 for ($c = mt_rand(1, 5); $c > 0; $c--) {
                     $v = '';
                     for ($k = mt_rand(0, 4); $k > 0; $k--) { $v .= $alphabet[mt_rand(0, count($alphabet) - 1)]; }
-                    if ($f->null !== null && $v === $f->null) { $v .= 'x'; } // documented: such a string reads back as null
                     $row[] = $v;
                 }
                 $rows[] = $row;
@@ -83,6 +82,46 @@ final class RoundTripTest extends TestCase
         $csv = Support::encode([[1, 2.5, true, false, null, '', 'x']], $f);
         $this->assertSame("1,2.5,1,0,\\N,,x\r\n", $csv);
         $this->assertSame([['1', '2.5', '1', '0', null, '', 'x']], Support::decode($csv, $f, false, Mode::Strict));
+    }
+
+    /** null, "" and the literal null text are three different values, in every mode and chunking. */
+    public function testNullEmptyStringAndTheLiteralNullTextRoundTrip(): void
+    {
+        foreach (['\N', '', 'NULL'] as $text) {
+            $f = new Format(null: $text);
+            $rows = [[null, '', $text], [$text, null, 'x'], ['a', null, null]];
+            $single = [[''], [$text]];
+            if ($text === '') { // null alone in a row cannot be told from a blank line
+                $rows = [[null, '', 'x'], ['', null, 'y'], ['a', null, null]];
+                $single = [['']];
+            }
+            foreach ([$rows, $single] as $set) { // (strict mode wants equal field counts)
+                $csv = Support::encode($set, $f);
+                foreach ([Mode::Lax, Mode::Strict] as $mode) {
+                    foreach ([0, 1, 3, 7] as $chunk) {
+                        $this->assertSame($set, Support::decode($csv, $f, false, $mode, $chunk), "null text '$text', {$mode->name}, chunk $chunk");
+                    }
+                }
+            }
+        }
+    }
+
+    public function testRandomNullRoundTrip(): void
+    {
+        mt_srand(31);
+        $f = new Format(null: 'NA');
+        $pool = [null, '', 'NA', 'x', 'N', 'NA,', ' NA', "NA\n", '"'];
+        for ($i = 0; $i < 200; $i++) {
+            $rows = [];
+            $width = mt_rand(2, 4);
+            for ($r = mt_rand(1, 6); $r > 0; $r--) {
+                $row = [];
+                for ($c = $width; $c > 0; $c--) { $row[] = $pool[mt_rand(0, count($pool) - 1)]; }
+                $rows[] = $row;
+            }
+            $csv = Support::encode($rows, $f);
+            $this->assertSame($rows, Support::decode($csv, $f, false, Mode::Strict, mt_rand(1, 9)), json_encode($rows));
+        }
     }
 
     public function testHeaderedRoundTrip(): void

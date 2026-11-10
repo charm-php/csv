@@ -372,6 +372,8 @@ final class DecoderTest extends TestCase
     {
         $f = new Format(null: '\N');
         $this->assertSame([['a', null, ''], [null]], Support::decode("a,\\N,\n\\N\n", $f));
+        $this->assertSame([['\\N', null, '\\N']], Support::decode("\"\\N\",\\N,\"\\N\"\n", $f), 'a quoted null text stays a string');
+        $this->assertSame([['\\N', null]], Support::decode("\"\\N\",\\N", $f, false, Mode::Strict), 'also in the slow path, and at the end of the input');
         $this->assertSame([['x' => null, 'y' => 'z']], Support::decode("x,y\n\\N,z\n", $f, true));
     }
 

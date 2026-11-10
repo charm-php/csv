@@ -42,6 +42,8 @@ final class Scanner
     /** @var list<string> multibyte delimiter / terminator */
     private array $multi = [];
     private int $peek;
+    /** Text that stands for null in unquoted fields, or null. */
+    private ?string $null;
 
     public function __construct(Format $d, bool $strict = false)
     {
@@ -56,6 +58,7 @@ final class Scanner
         $this->strict = $strict;
         $this->check = $strict; // strict mode also demands equal field counts
         $this->skip = $d->skipInitialSpace;
+        $this->null = $d->null;
         if ($this->Ld === 1) { $this->stops .= $this->D; } else { $this->multi[] = $this->D; }
         if ($this->std) { $this->stops .= "\r\n"; }
         elseif ($this->Lx === 1) { $this->stops .= $this->X; }
@@ -71,6 +74,7 @@ final class Scanner
         $x0 = $this->X[0];
         $e0 = $this->quote ? $this->E[0] : false; // false never equals a byte, so NONE needs no extra test
         [$stops, $multi, $quote, $strict, $skip] = [$this->stops, $this->multi, $this->quote, $this->strict, $this->skip];
+        $nul = $this->null;
         $n = strlen($s);
         $p = 0;
         $rows = [];
@@ -109,6 +113,9 @@ final class Scanner
                         $row = explode($D, substr($s, $p, $le - $p));
                         $p = $le + ($std ? ($s[$le] === "\r" && ($s[$le + 1] ?? '') === "\n" ? 2 : 1) : $Lx);
                     }
+                    if ($nul !== null) { // only unquoted fields can be null, and this line has no quoted field
+                        foreach ($row as $k => $v) { if ($v === $nul) { $row[$k] = null; } }
+                    }
                     goto record;
                 }
             }
@@ -116,7 +123,7 @@ final class Scanner
             while (true) {
                 if ($skip && ($p += strspn($s, ' ', $p)) >= $n) { // only spaces left
                     if (!$final) { $p = $rs; goto done; }
-                    $row[] = '';
+                    $row[] = $nul === '' ? null : '';
                     break;
                 }
                 if ($s[$p] === $e0 && ($Le === 1 || substr_compare($s, $E, $p, $Le) === 0)) {
@@ -156,6 +163,7 @@ final class Scanner
                         $this->fail('unexpected quote in unquoted field', $s, $p + $at, count($rows));
                     }
                     $p = $end;
+                    if ($val === $nul) { $val = null; } // (a quoted field never equals null here: $nul is null when unused)
                 }
                 if ($p > $lim && !($std && ($s[$p] ?? '') === "\n")) {
                     if (!$final) { $p = $rs; goto done; }
@@ -167,7 +175,7 @@ final class Scanner
                     $p += $Ld;
                     if ($p < $n) { continue; }
                     if (!$final) { $p = $rs; goto done; }
-                    $row[] = ''; // input ends right after a delimiter: one more, empty field
+                    $row[] = $nul === '' ? null : ''; // input ends right after a delimiter: one more, empty field
                     break;
                 }
                 // Not a delimiter, so (the scan stopped there) a terminator.

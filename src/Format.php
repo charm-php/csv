@@ -29,8 +29,8 @@ final readonly class Format
         public bool $bom = false,
         /**
          * Optional text standing for null, to tell null from "" in a round trip. The Encoder writes null as this text
-         * (instead of ""), the Decoder returns null for every field equal to it. A string field that equals it
-         * therefore reads back as null: pick text your data never contains.
+         * (instead of ""), the Decoder returns null for every unquoted field equal to it. The Encoder encloses a string
+         * that equals it, so `""` and the literal text stay strings in a round trip.
          */
         public ?string $null = null,
     ) {

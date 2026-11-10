@@ -21,7 +21,7 @@ namespace Charm\Csv;
  *    sequence is matched exactly). Blank lines are skipped, so a record holding one empty field must
  *    be written as `""` (the Encoder does).
  *  - A UTF-8 BOM at the very start is stripped.
- *  - Fields are strings; with Format::$null set, fields equal to it become null.
+ *  - Fields are strings; with Format::$null set, unquoted fields equal to it become null (a quoted one stays a string).
  *  - Header `false`: records are lists. `true`: the first record names the columns and later records
  *    are associative arrays. A list of names: every record is associative with those names. PHP turns
  *    numeric-string names such as "1" into integer keys.
@@ -61,7 +61,7 @@ final class Decoder
             }
             $this->header = $header;
         }
-        $this->post = $header !== false || $format->null !== null;
+        $this->post = $header !== false;
         $this->reset();
     }
 
@@ -120,14 +120,6 @@ final class Decoder
         if ($this->header === true && $this->names === null && $rows) {
             $this->names = $this->namesFrom(array_shift($rows));
         }
-        $null = $this->format->null;
-        if ($null !== null) {
-            foreach ($rows as $i => $row) {
-                foreach ($row as $j => $v) {
-                    if ($v === $null) { $rows[$i][$j] = null; }
-                }
-            }
-        }
         $names = $this->names;
         if ($names === null) {
             return $rows;
@@ -151,9 +143,7 @@ final class Decoder
     {
         $seen = [];
         foreach ($raw as $i => $name) {
-            if ($this->format->null !== null && $name === $this->format->null) {
-                $name = '';
-            }
+            $name ??= ''; // an unquoted null text
             if ($name === '' || isset($seen[$name])) {
                 $why = $name === '' ? 'empty column name' : "duplicate column name '$name'";
                 if ($this->mode === Mode::Strict) {

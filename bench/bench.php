@@ -110,9 +110,21 @@ foreach (['plain', 'messy'] as $name) {
 }
 
 // ---- encoding ----------------------------------------------------------------------------------
+// "numeric (real ints)": 5 columns of PHP ints, the shape of rows that come from a database
+$numFile = "$dir/numeric-$rowsN.csv";
+if (!is_file($numFile)) {
+    mt_srand(3);
+    $h = fopen($numFile, 'wb');
+    for ($i = 0; $i < $rowsN; $i++) { fwrite($h, mt_rand(0, 999999) . ',' . mt_rand(0, 999999) . ',' . mt_rand(0, 999) . ',' . mt_rand(0, 99999999) . ',' . mt_rand(0, 9) . "\n"); }
+    fclose($h);
+}
+
 echo "### Encoding $rowsN rows to php://memory\n\n| Data | Method | best ms | median ms | MB/s (best) | vs fputcsv (best) |\n|---|---|---:|---:|---:|---:|\n";
-foreach (['plain', 'messy'] as $name) {
-    $rows = Cases::fgetcsvCollect("$dir/$name-$rowsN.csv");
+foreach (['plain', 'messy', 'numeric (real ints)'] as $name) {
+    $rows = Cases::fgetcsvCollect($name === 'numeric (real ints)' ? $numFile : "$dir/$name-$rowsN.csv");
+    if ($name === 'numeric (real ints)') {
+        $rows = array_map(fn($r) => array_map('intval', $r), $rows);
+    }
     $a = measure($runs, fn() => Cases::fputcsv($rows));
     $b = measure($runs, fn() => Cases::encoder($rows));
     $sizeA = Cases::fputcsv($rows);
@@ -120,7 +132,7 @@ foreach (['plain', 'messy'] as $name) {
     printf("| %s | fputcsv() loop | %.0f | %.0f | %.0f | 1.00x |\n", $name, $a[0], $a[1], $sizeA / 1e6 / ($a[0] / 1000));
     printf("| %s | Encoder + fwrite() | %.0f | %.0f | %.0f | %.2fx |\n", $name, $b[0], $b[1], $sizeB / 1e6 / ($b[0] / 1000), $a[0] / $b[0]);
 }
-echo "\n(fputcsv() also encloses fields containing a space or tab, so its output is slightly larger; MB/s uses each method's own output size.)\n\n";
+echo "\n(fputcsv() also encloses fields containing a space or tab, so its output differs (larger, still valid); this compares speed only. MB/s uses each method's own output size.)\n\n";
 
 // ---- proof that the JIT compiled something -----------------------------------------------------
 $status = function_exists('opcache_get_status') ? opcache_get_status(false) : false;
