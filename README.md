@@ -208,7 +208,7 @@ and the same with `-d opcache.jit_buffer_size=0` (opcache on, JIT off).
 | `fputcsv()` loop | 100 | 119 |
 | `Encoder` + `fwrite()` | 178 (0.56x) | 362 (0.33x) |
 
-Without the JIT the numbers differ: the decoder is 25-45% slower than with it, while `fgetcsv()` and `fputcsv()`, which are native code, do not change.
+Without the JIT the numbers differ: the decoder is 30-45% slower than with it, while `fgetcsv()` and `fputcsv()`, which are native code, do not change.
 Your numbers will depend on the PHP build, the CPU and the data; the machine this was measured on was not idle, so differences of 10-15% between runs are noise.
 Timings include building the result arrays, so the cycle collector is part of them (it is why "messy" is slower than its extra bytes suggest).
 `fputcsv()` also encloses fields that contain a space or a tab, so its output is slightly larger than the `Encoder`'s.
