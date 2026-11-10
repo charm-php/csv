@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv;
+namespace Charm\Csv;
 
 /**
  * CSV writer. Rows are encoded into an internal buffer that is flushed to the stream in

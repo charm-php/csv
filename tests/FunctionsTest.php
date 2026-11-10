@@ -2,17 +2,17 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv\Tests;
+namespace Charm\Csv\Tests;
 
-use FrodeBorli\Csv\ParseException;
+use Charm\Csv\ParseException;
 use PHPUnit\Framework\TestCase;
 
-use function FrodeBorli\Csv\array_to_row;
-use function FrodeBorli\Csv\buffer_to_collection;
-use function FrodeBorli\Csv\buffer_to_collection_lax;
-use function FrodeBorli\Csv\collection_to_buffer;
-use function FrodeBorli\Csv\collection_to_file;
-use function FrodeBorli\Csv\row_to_array;
+use function Charm\Csv\array_to_row;
+use function Charm\Csv\buffer_to_collection;
+use function Charm\Csv\buffer_to_collection_lax;
+use function Charm\Csv\collection_to_buffer;
+use function Charm\Csv\collection_to_file;
+use function Charm\Csv\row_to_array;
 
 final class FunctionsTest extends TestCase
 {

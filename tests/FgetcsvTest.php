@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv\Tests;
+namespace Charm\Csv\Tests;
 
-use FrodeBorli\Csv\Reader;
+use Charm\Csv\Reader;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -37,7 +37,7 @@ final class FgetcsvTest extends TestCase
 
     public function testFixturesAreWellFormedForTheStrictReader(): void
     {
-        $this->assertNotEmpty(Reader::fromFile(__DIR__ . '/fixtures/messy-sample.csv', new \FrodeBorli\Csv\Dialect(strict: true))->toArray());
+        $this->assertNotEmpty(Reader::fromFile(__DIR__ . '/fixtures/messy-sample.csv', new \Charm\Csv\Dialect(strict: true))->toArray());
     }
 
     public function testColumnsAreTheTransposedRows(): void

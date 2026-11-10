@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv\Tests;
+namespace Charm\Csv\Tests;
 
-use FrodeBorli\Csv\Dialect;
-use FrodeBorli\Csv\Quoting;
+use Charm\Csv\Dialect;
+use Charm\Csv\Quoting;
 
 /**
  * Deliberately naive, byte-by-byte implementation of the documented lax semantics, used to

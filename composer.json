@@ -1,9 +1,23 @@
 {
-    "name": "frodeborli/csv",
-    "description": "A fast, RFC 4180 CSV reader and writer in userspace PHP: lazy streaming, strict/lax parsing, multibyte dialects, row/associative/column-major output.",
+    "name": "charm/csv",
+    "description": "Fast RFC 4180 CSV encoding and decoding in PHP: a readonly Format, an Encoder and an incremental Decoder that accepts input in arbitrary chunks.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["csv", "rfc4180", "parser", "streaming", "tsv"],
+    "authors": [
+        {
+            "name": "Frode Børli",
+            "email": "frode@ennerd.com"
+        }
+    ],
+    "keywords": [
+        "csv",
+        "rfc4180",
+        "tsv",
+        "parser",
+        "encoder",
+        "decoder",
+        "incremental"
+    ],
     "require": {
         "php": ">=8.2"
     },
@@ -11,11 +25,19 @@
         "phpunit/phpunit": "^11.5"
     },
     "autoload": {
-        "psr-4": { "FrodeBorli\\Csv\\": "src/" },
-        "files": ["src/functions.php"]
+        "psr-4": {
+            "Charm\\Csv\\": "src/"
+        },
+        "files": [
+            "src/functions.php"
+        ]
     },
     "autoload-dev": {
-        "psr-4": { "FrodeBorli\\Csv\\Tests\\": "tests/" }
+        "psr-4": {
+            "Charm\\Csv\\Tests\\": "tests/"
+        }
     },
-    "config": { "sort-packages": true }
+    "config": {
+        "sort-packages": true
+    }
 }

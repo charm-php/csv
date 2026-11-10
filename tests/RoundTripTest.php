@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv\Tests;
+namespace Charm\Csv\Tests;
 
-use FrodeBorli\Csv\Dialect;
-use FrodeBorli\Csv\Quoting;
-use FrodeBorli\Csv\Reader;
-use FrodeBorli\Csv\Writer;
+use Charm\Csv\Dialect;
+use Charm\Csv\Quoting;
+use Charm\Csv\Reader;
+use Charm\Csv\Writer;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

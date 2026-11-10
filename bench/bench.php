@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Benchmarks frodeborli/csv against fgetcsv()/str_getcsv()/fputcsv() on generated data.
+ * Benchmarks charm/csv against fgetcsv()/str_getcsv()/fputcsv() on generated data.
  *
  *   php bench/bench.php                      # no opcache, no JIT
  *   php -d opcache.enable_cli=1 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M bench/bench.php
@@ -13,9 +13,9 @@ declare(strict_types=1);
  * unless the row says "lazy".
  */
 
-use FrodeBorli\Csv\Dialect;
-use FrodeBorli\Csv\Reader;
-use FrodeBorli\Csv\Writer;
+use Charm\Csv\Dialect;
+use Charm\Csv\Reader;
+use Charm\Csv\Writer;
 
 require __DIR__ . '/../vendor/autoload.php';
 

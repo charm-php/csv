@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv;
+namespace Charm\Csv;
 
 /**
  * The format of a CSV stream. Immutable; use with() to derive variants:

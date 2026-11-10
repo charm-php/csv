@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv;
+namespace Charm\Csv;
 
 /** Malformed CSV input. Positions are 1-based; `column` counts UTF-8 characters. */
 final class ParseException extends \RuntimeException

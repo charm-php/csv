@@ -1,4 +1,4 @@
-# frodeborli/csv
+# charm/csv
 
 A CSV reader and writer in plain userspace PHP (8.2+, no dependencies, no extension).
 
@@ -12,13 +12,13 @@ runs once per field (or once per line, for lines without quotes). Everything bel
 (see [Tests](#tests)) and the numbers are reproducible with one command (see [Benchmarks](#benchmarks)).
 
 ```
-composer require frodeborli/csv
+composer require charm/csv
 ```
 
 ## Quick start
 
 ```php
-use FrodeBorli\Csv\{Dialect, Quoting, Reader, Writer};
+use Charm\Csv\{Dialect, Quoting, Reader, Writer};
 
 // Read: lazily, from a file path, a string or any stream resource
 foreach (Reader::fromFile('data.csv') as $row) {            // ['1', 'Ann', 'ann@example.com']
@@ -55,8 +55,8 @@ Writer::rowsToString($rows, Dialect::tsv());
 ### RFC-compatible functions
 
 `array_to_row`, `row_to_array`, `collection_to_buffer`, `buffer_to_collection`,
-`buffer_to_collection_lax` and `collection_to_file` exist in the `FrodeBorli\Csv` namespace with the
-RFC's signatures (`$delimiter`, `$enclosure`, `$eolSequence`), so `use function FrodeBorli\Csv\buffer_to_collection;`
+`buffer_to_collection_lax` and `collection_to_file` exist in the `Charm\Csv` namespace with the
+RFC's signatures (`$delimiter`, `$enclosure`, `$eolSequence`), so `use function Charm\Csv\buffer_to_collection;`
 is a drop-in. `LazyLaxCollection::createFromBuffer()/createFromFile()` correspond to
 `Reader::fromString()/fromFile()` (a `Reader` is an `IteratorAggregate` too).
 
@@ -188,7 +188,7 @@ self-overlapping tokens, many chunk sizes, in lax and strict mode. A row with no
 
 Based on my reading of the RFC text; check the RFC for the final word on ext/csv.
 
-| | frodeborli/csv | ext/csv (RFC) | `fgetcsv()` |
+| | charm/csv | ext/csv (RFC) | `fgetcsv()` |
 |---|---|---|---|
 | Requires | PHP 8.2+, userspace | PHP core (proposed) | PHP core |
 | RFC 4180 by default, no escape character | yes | yes | no (`\` escape unless disabled) |

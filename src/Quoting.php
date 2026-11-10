@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv;
+namespace Charm\Csv;
 
 /**
  * When the writer encloses a field.

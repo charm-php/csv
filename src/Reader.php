@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace FrodeBorli\Csv;
+namespace Charm\Csv;
 
 /**
  * Lazy CSV reader over a string, a file path or a stream resource.

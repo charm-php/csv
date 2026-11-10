@@ -12,7 +12,7 @@ declare(strict_types=1);
  * (a RuntimeException) rather than ValueError. Field values may also be Stringable objects.
  */
 
-namespace FrodeBorli\Csv;
+namespace Charm\Csv;
 
 /** One row to one CSV record string, including the line terminator. */
 function array_to_row(array $fields, string $delimiter = ',', string $enclosure = '"', string $eolSequence = "\r\n"): string
