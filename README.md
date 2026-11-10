@@ -1,261 +1,231 @@
 # charm/csv
 
-A CSV reader and writer in plain userspace PHP (8.2+, no dependencies, no extension).
+CSV encoding and decoding in plain PHP (8.2+, no dependencies, no extension): a readonly `Format`,
+an `Encoder` that turns one row into one record, and an incremental `Decoder` that accepts input in chunks
+of any size. There is no stream, file or generator handling in the package; you read and write with
+`fread()` / `fwrite()` (or any other source and sink) and let the codec do only the CSV.
 
-PHP's own `fgetcsv()` parses at roughly 13 MB/s, and a CSV extension has been proposed for core
-([RFC: CSV Extension](https://wiki.php.net/rfc/csv_extension), php-src PR #24199). This library
-exists to show what userspace can do: it parses 7-10x faster than `fgetcsv()` on quote-free data
-and 2-3x faster on heavily quoted data, with a feature set that covers the RFC's API surface and adds
-streams, headers, column-major output, quoting modes and strict/lax parsing. It does not loop over
-characters: `strcspn()`, `strpos()` and `explode()` find field and record boundaries in C, and PHP only
-runs once per field (or once per line, for lines without quotes). Everything below is covered by tests
-(see [Tests](#tests)) and the numbers are reproducible with one command (see [Benchmarks](#benchmarks)).
+The `Decoder` is built for speed. It does not loop over characters: `strcspn()`, `strpos()` and
+`explode()` find field and record boundaries in C, so PHP runs once per field (once per line for lines
+without quotes). See [Performance](#performance) for measured numbers.
+
+The API shape is the one proposed for ext/csv on php internals (a `Format` value object, an `Encoder`, a
+`Decoder`, a `Quoting` enum). Its sibling charm/jsonl has the same
+method names (`encode()`, `decode()`, `finish()`), without a shared interface.
 
 ```
 composer require charm/csv
 ```
 
-## Quick start
+## Usage
 
 ```php
-use Charm\Csv\{Dialect, Quoting, Reader, Writer};
+use Charm\Csv\{Decoder, Encoder, Format, Mode};
 
-// Read: lazily, from a file path, a string or any stream resource
-foreach (Reader::fromFile('data.csv') as $row) {            // ['1', 'Ann', 'ann@example.com']
+// Decode a stream: read, decode, and call finish() at the end
+$decoder = new Decoder(header: true);
+$h = fopen('users.csv', 'rb');
+while (!feof($h)) {
+    foreach ($decoder->decode(fread($h, 65536)) as $user) {   // ['id' => '1', 'name' => 'Ann']
+        // ...
+    }
 }
-$rows = Reader::fromString("a,b\r\n1,\"x,y\"\r\n")->toArray();  // [['a','b'], ['1','x,y']]
-
-// Header row -> associative rows
-foreach (Reader::fromFile('users.csv')->withHeader() as $user) {   // ['id' => '1', 'name' => 'Ann']
+foreach ($decoder->finish() as $user) {                        // the last record, if the file has no final newline
+    // ...
 }
 
-// Column-major, with optional casts (see "Output shapes")
-$cols = Reader::fromFile('users.csv')->withHeader()
-    ->withCasts(['id' => intval(...)])->columns();             // ['id' => [1, 2, ...], 'name' => ['Ann', ...]]
+// Decode a string
+$decoder = new Decoder();
+$rows = [...$decoder->decode("a,b\r\n1,\"x,y\"\r\n"), ...$decoder->finish()];   // [['a','b'], ['1','x,y']]
 
-// Dialects
-$d = Dialect::rfc4180()->with(delimiter: ';', strict: true);
-$rows = Reader::fromFile('eu.csv', $d)->toArray();
+// Encode to a stream
+$encoder = new Encoder(Format::excel(), header: true);         // BOM + CRLF, header from the first row's keys
+$out = fopen('out.csv', 'wb');
+foreach ($rows as $row) {                                      // ['id' => 1, 'name' => 'Ann']
+    fwrite($out, $encoder->encode($row));
+}
 
-// Write: rows, associative rows or generators; to a file, php://output or any stream
-$w = Writer::toFile('out.csv', Dialect::excel());            // UTF-8 BOM + CRLF, for Excel
-$w->writeRows([['id' => 1, 'name' => 'Ann'], ['id' => 2, 'name' => 'Bob']]);   // header derived from keys
-$w->close();
+// Encode to a string
+(new Encoder())->encode(['a', 'b,c']);                         // "a,\"b,c\"\r\n"
 
-header('Content-Type: text/csv');
-$w = Writer::toStream(fopen('php://output', 'w'));           // HTTP download, flushed in 1 MiB writes
-$w->writeHeader(['id', 'name']);
-$w->writeRows($generatorOfRows);
-
-// Strings
-Writer::rowToString(['a', 'b,c']);                           // "a,\"b,c\"\r\n"
-Writer::rowsToString($rows, Dialect::tsv());
+// Other formats
+$format = Format::rfc4180()->with(delimiter: ';');
+$decoder = new Decoder($format, mode: Mode::Lax);
 ```
 
-### RFC-compatible functions
+## API
 
-`array_to_row`, `row_to_array`, `collection_to_buffer`, `buffer_to_collection`,
-`buffer_to_collection_lax` and `collection_to_file` exist in the `Charm\Csv` namespace with the
-RFC's signatures (`$delimiter`, `$enclosure`, `$eolSequence`), so `use function Charm\Csv\buffer_to_collection;`
-is a drop-in. `LazyLaxCollection::createFromBuffer()/createFromFile()` correspond to
-`Reader::fromString()/fromFile()` (a `Reader` is an `IteratorAggregate` too).
+```php
+namespace Charm\Csv;
 
-## Dialects
+enum Quoting { case Minimal; case All; case NonNumeric; case Never; }
+enum Mode { case Strict; case Lax; }
 
-`Dialect` is an immutable value object; derive variants with `with()`.
+final readonly class Format
+{
+    public function __construct(
+        public string $delimiter = ',',
+        public string $enclosure = '"',
+        public string $eolSequence = "\r\n",
+        public Quoting $quoting = Quoting::Minimal,
+        public bool $skipInitialSpace = false,
+        public bool $bom = false,
+        public ?string $null = null,
+    ) {}
+    public static function rfc4180(): self;   // the defaults
+    public static function excel(): self;     // rfc4180 + UTF-8 BOM when encoding
+    public static function tsv(): self;       // tab, LF, Quoting::Never
+    public static function unix(): self;      // rfc4180 with LF
+    public function with(mixed ...$changes): self;
+}
+
+final class Encoder
+{
+    public function __construct(Format $format = new Format(), bool|array $header = false);
+    public function encode(array $row): string;            // one record, including the EOL sequence
+}
+
+final class Decoder
+{
+    public function __construct(Format $format = new Format(), bool|array $header = false, Mode $mode = Mode::Strict);
+    public function decode(string $chunk): array;          // records completed by this chunk
+    public function finish(): array;                       // end of input: last record, validation; resets the decoder
+}
+
+final class ParseException extends \RuntimeException {}    // public readonly int $lineNumber, $column, $record
+```
+
+### Format
 
 | Option | Default | Meaning |
 |---|---|---|
 | `delimiter` | `,` | Any non-empty byte string, e.g. `;`, `\t`, `→`, `\|\|` |
-| `enclosure` | `"` | Any non-empty byte string that does not overlap itself; escaped by doubling |
-| `lineTerminator` | `\r\n` | Written after each row. When reading, `\r\n`, `\n` and `\r` are all accepted if this is one of them; any other terminator (`\x1e`, `<>`) is matched exactly |
-| `quoting` | `Quoting::MINIMAL` | `MINIMAL`, `ALL`, `NONNUMERIC` (PHP ints/floats stay bare), `NONE` (throws if a field would need quoting; when reading, quotes are literal text) |
-| `skipInitialSpace` | `false` | Reading: ignore spaces at the start of a field. The writer then encloses fields that start with a space |
-| `strict` | `false` | Reading: throw `ParseException` instead of recovering (see below) |
-| `bom` | `false` | Writing: start with a UTF-8 BOM. A BOM is always stripped when reading |
+| `enclosure` | `"` | Any non-empty byte string that does not overlap itself; escaped by doubling. There is no escape character |
+| `eolSequence` | `\r\n` | Written after each record. When decoding, `\r\n`, `\n` and `\r` are all accepted if this is one of them; any other sequence (`\x1e`, `<>`) is matched exactly |
+| `quoting` | `Quoting::Minimal` | `Minimal`; `All`; `NonNumeric` (PHP ints and floats stay bare); `Never` (the Encoder throws `UnexpectedValueException` if a field would need quoting; the Decoder treats quotes as literal text) |
+| `skipInitialSpace` | `false` | Decoding: ignore spaces at the start of a field. The Encoder then encloses fields that start with a space |
+| `bom` | `false` | Encoding: start with a UTF-8 BOM. The Decoder always strips a BOM at the start of the input |
+| `null` | `null` | Text that stands for null, e.g. `'\N'`. The Encoder writes null as this text, the Decoder returns null for fields equal to it. A string equal to it reads back as null, so choose text your data does not contain |
 
-Presets: `Dialect::rfc4180()`, `Dialect::excel()` (RFC 4180 + BOM; for `;` locales use `->with(delimiter: ';')`),
-`Dialect::tsv()` (tab, LF, `Quoting::NONE`, as in IANA's text/tab-separated-values), `Dialect::unix()` (RFC 4180 with LF).
+A `Format` with empty tokens, or with a delimiter, enclosure or EOL sequence that equals or contains another, or an
+enclosure that overlaps itself, throws `ValueError`. Multibyte tokens are supported (UTF-8 is self-synchronising, so
+byte search is safe). A multibyte delimiter that overlaps itself (`||`) is allowed and matched left to right, so `a|||b`
+decodes as `a`, `|b`; the Encoder encloses a field ending in `|` so its output always decodes back to the same values.
 
-Invalid dialects throw `ValueError` when constructed: empty tokens; a delimiter, enclosure or terminator
-that equals or contains another; an enclosure that overlaps itself (`||` cannot be escaped by doubling
-unambiguously). Multibyte delimiters, enclosures and terminators are supported; UTF-8 is self-synchronising,
-so byte search is safe. A multibyte delimiter that overlaps itself (`||`) is allowed, and tokens are matched left to
-right, so `a|||b` reads as `a`, `|b`. The writer encloses such fields (a field ending in `|` gets quoted) so that
-its output always reads back to the same values.
+### Decoder
 
-There is no escape character (as in the RFC; `fgetcsv()`'s `\` default is a well-known source of bugs),
-and parsing never depends on the locale.
+* **Chunks.** `decode()` takes any piece of the input and returns the records it completed. A record that is not provably
+  complete at the end of a chunk (including a lone `\r`, a closing quote, or half of a multibyte token) is kept and parsed again when more
+  input arrives, so where you cut the input never changes the result. A record is returned as soon as it is known to be complete; the
+  first three bytes of the input are held back until they are known not to be a BOM.
+  `finish()` returns the last record (input that does not end with an EOL), throws on an unterminated enclosure in `Mode::Strict`, and
+  resets the decoder so it can be used again.
+* **Blank lines** are skipped. A record with a single empty field must therefore be written as `""` (the Encoder does). A record with no fields cannot be represented.
+* **Header.** `false`: records are lists of strings. `true`: the first record names the columns and the following records are
+  associative arrays. A list of names: every record is associative with those names, and the first record is data. PHP turns
+  numeric-string names such as `"1"` into integer keys.
+* **Mode::Strict** (default) throws `ParseException` on malformed input and on a record whose field count differs from the first record's (or from the header's).
+  **Mode::Lax** recovers the way `fgetcsv()` does and does not check field counts. With a header, a short record is padded with `null` and a long one
+  keeps its extra fields under integer keys (their position): `['a' => '1', 'b' => '2', 2 => '3']`.
+* **Header names.** Strict throws on empty or duplicate names in the header record; Lax renames them `column_N`, `name_2`, `name_3`. Names you pass as a list must be non-empty and unique (`ValueError`).
 
-## Reading
-
-```php
-Reader::fromString(string $csv, ?Dialect $d = null)
-Reader::fromFile(string $path, ?Dialect $d = null)    // opened lazily, closed when iteration ends
-Reader::fromStream($resource, ?Dialect $d = null)     // read from its current position; never closed
-```
-
-Rows are produced lazily (one chunk of rows in memory at a time) in chunks of 256 KiB by default
-(`->withChunkSize()`; 4 KiB to 256 KiB measured about equal, 4 MiB slower). The result never depends on the
-chunk size: a record that is not provably complete at the end of a chunk is carried over and re-scanned with more
-data, which is why a lone `\r`, a closing quote or half of a multibyte token at a chunk edge is handled correctly. The tests run
-every fixture with chunk sizes 1 to 17 bytes, including multibyte tokens split at every byte. Records larger
-than a chunk grow the read size geometrically, so they stay linear.
-
-Blank lines are skipped. A row consisting of one empty field is therefore written as `""` by `Writer`.
-
-### Output shapes
-
-```php
-$r = Reader::fromFile('users.csv');
-$r->toArray();                         // [['1','Ann'], ...]                       row-major lists (also: foreach)
-$r->withHeader()->toArray();           // [['id'=>'1','name'=>'Ann'], ...]         associative, first record is the header
-$r->withHeader(['id','name'])          // ... or with given names; the first record is then data
-$r->withHeader()->columns();           // ['id'=>['1',...], 'name'=>['Ann',...]]   column-major
-$r->columns();                         // [['id','1',...], ['name','Ann',...]]     column-major, no header: a list of columns
-$r->withCasts(['id' => intval(...), 2 => floatval(...)])   // by name (needs a header) or index; null stays null
-```
-
-Column-major output is built chunk by chunk with `array_column()` (no full row array ever exists; only one chunk's rows at a
-time) and every column is one packed array. The memory saving is real but depends on the data. Measured on this
-machine, peak memory above baseline, 200 000 rows:
-
-| Data | Shape | Peak MB |
-|---|---|---:|
-| 8 text columns, 14 MB file | `fgetcsv()` rows array | 105.6 |
-| | `Reader` rows | 114.8 |
-| | `Reader` associative rows | 147.5 |
-| | `Reader` columns | 104.8 |
-| | `Reader` lazy `foreach` | 5.0 |
-| 5 integer columns, 5.7 MB file | associative rows (strings) | 113.4 |
-| | columns (strings) | 66.6 |
-| | columns with `intval` casts | 35.8 |
-
-For text columns the strings dominate and column-major saves little over rows (it avoids the per-row array and, versus
-associative rows, the per-row hash table: about 29% less). It pays off for numeric columns, where casting turns 32-byte-plus string allocations into 16-byte ints (-68% vs
-associative rows), and for many-column data. Building columns costs time (about 1.8x the row-major time here).
-If you can process rows as they arrive, lazy iteration beats all of them. Note that PHP turns numeric-string
-keys such as `"1"` into integer keys.
-
-### Headers
-
-* A row whose width differs from the header: strict throws `ParseException`; lax pads with `null` or drops extra fields.
-* Empty or duplicate header names: strict throws; lax renames them `column_N`, `name_2`, `name_3`.
-* Names you pass to `withHeader([...])` must be non-empty and unique (`ValueError`).
-* `->requireConsistentFields()` makes list mode throw when a row's width differs from the first row's.
-
-### Strict vs lax
-
-Both modes parse valid RFC 4180 input identically. They differ only on malformed input. "Lax" is this library's own
-definition, chosen to match what `fgetcsv()` does on these cases (it is not the RFC's lax mode, which concerns row width):
-
-| Malformed input | Strict (`strict: true`) | Lax (default) |
+| Malformed input | `Mode::Strict` | `Mode::Lax` |
 |---|---|---|
-| Unterminated quoted field | `ParseException` at the opening quote | the rest of the input is the field |
+| Unterminated enclosure | `ParseException` at the opening quote (from `finish()`) | the rest of the input is the field |
 | Text after a closing quote: `"ab"cd,` | `ParseException` | appended to the field up to the next delimiter: `abcd` |
 | Quote inside an unquoted field: `5" pipe` | `ParseException` | literal |
-| Space before an opening quote: `a, "b"` | the same as the line above (use `skipInitialSpace`) | field ` "b"` |
-| Row width differs from the header | `ParseException` | pad with `null` / drop extras |
+| Space before an opening quote: `a, "b"` | `ParseException` (use `skipInitialSpace`) | the field ` "b"` |
+| Field count differs from the first record | `ParseException` | accepted as it is |
 
-`ParseException` has public readonly `csvLine`, `column` (1-based, UTF-8 characters) and `record` (1-based, header
-is record 1; blank lines count as lines, not records). Lines count `\r\n`, `\n` and `\r`, including those inside quoted fields.
+"Lax" is this library's own definition, chosen to match what `fgetcsv()` does on these inputs.
+`ParseException` has public readonly `lineNumber` (1-based, counts `\r\n`, `\n` and `\r` over the whole input, also inside quoted fields and across chunks),
+`column` (1-based, UTF-8 characters) and `record` (1-based; a header is record 1; blank lines count as lines, not records).
+After a `ParseException` discard the decoder.
 
-## Writing
+Limit: a record that is still incomplete is parsed again whenever more input arrives, so a single record of N bytes fed in tiny chunks costs
+O(N²/chunk). Feed chunks of a few KiB or more (the stream loop above uses 64 KiB). A record is held in memory whole.
 
-```php
-$w = Writer::toFile('out.csv', $dialect);            // or Writer::toStream($res, $dialect), new Writer(null) for memory
-$w->writeHeader(['id', 'name']);                     // optional; fixes the column order for associative rows
-$w->writeRow(['1', 'Ann']);                          // lists are written as they are
-$w->writeRow(['name' => 'Bob', 'id' => 2]);          // associative rows follow the header; missing keys are empty,
-$w->writeRows($anyIterableOrGenerator);              //   unknown keys throw ValueError
-$w->close();                                         // flush; also done on destruction
-```
+### Encoder
 
-Rows are encoded into a buffer that is flushed in writes of at least 1 MiB (configurable), never per field.
-Values may be strings, ints, floats (round-trip exact, locale independent, so `1.0` is written as `1.0`), bools
-(`1` or empty), `null` (empty) and `Stringable`; anything else throws `TypeError`.
+* **Field values.** Strings, ints, floats (written round-trippably and independent of the locale, so `1.0` is `1.0`), `true` as `1`, `false` as `0`, `null`
+  as an empty field (or `Format::$null`), and backed enums as their value. Anything else (arrays, resources, pure enums, objects, including `Stringable`) throws `TypeError`.
+* **Enclosing.** A field is enclosed when it contains the delimiter, the enclosure or a line break; when it ends with a fragment of a multibyte token that could combine
+  with the following delimiter or EOL; when it is the only field of a record and empty; when `skipInitialSpace` is on and it starts with a space; and when it is the first field
+  of the output and starts with a BOM. `All` and `NonNumeric` enclose more; `Never` throws instead of enclosing.
+* **Header.** `true`: the first `encode()` call also emits a header record from that row's keys (the row must be associative). A list: that header is emitted first.
+  In both cases later associative rows are written in the header's column order, by key: missing keys become null, keys that are not in the header throw `ValueError`.
+  List rows are written as they are. Without a header, rows are written as they are, whatever their keys.
+* **Round trip.** For any rows of strings with at least one field, `decode(encode(rows)) === rows` in every format (with `Never`: whenever the Encoder accepts the rows).
+  A property test checks this over 16 formats, including multibyte and self-overlapping tokens, random chunkings and both modes. A row with no fields is written as a blank line, which the Decoder skips.
 
-A field is enclosed when it contains the delimiter, the enclosure or a line break, when it ends with a fragment of a
-multibyte token that could combine with the following delimiter or terminator, when it is the only field of a
-row and empty, when `skipInitialSpace` is on and it starts with a space, and when it is the very first field and starts with a BOM.
-`Quoting::NONE` throws `UnexpectedValueException` in those cases rather than writing something that cannot be read back.
+## Performance
 
-**Round trip:** for any list of rows, each with at least one string field, `read(write(rows)) === rows` in every dialect (with `NONE`:
-whenever the writer accepts the rows). This is checked with a seeded property test over 15 dialects, including multibyte and
-self-overlapping tokens, many chunk sizes, in lax and strict mode. A row with no fields is written as a blank line, which readers skip.
+Measured on PHP 8.5.12, Linux 6.8, Intel Xeon E5-2697 v3 @ 2.6 GHz, 200 000 rows x 8 columns, best of 9 runs after 2 warm-up runs
+(the median is within a few percent except where noted). The data is generated by `bench/bench.php` (git-ignored, in `bench/data/`):
+"plain" has no quotes (14 MB); "messy" has quoted fields, doubled quotes, embedded newlines and commas in 1 of 5 fields, so most lines contain
+a quote (16.5 MB). Every row is read through `fread(…, 65536)` + `decode()` + `finish()`, from a file. "collect" builds the complete result array
+(for every method in the table), "stream" counts the rows and discards them.
 
-## Compared with ext/csv and fgetcsv
-
-Based on my reading of the RFC text; check the RFC for the final word on ext/csv.
-
-| | charm/csv | ext/csv (RFC) | `fgetcsv()` |
-|---|---|---|---|
-| Requires | PHP 8.2+, userspace | PHP core (proposed) | PHP core |
-| RFC 4180 by default, no escape character | yes | yes | no (`\` escape unless disabled) |
-| Locale independent | yes | yes | not guaranteed |
-| Multibyte delimiter / enclosure / terminator | yes | yes | single byte (terminator not configurable) |
-| Rejects ambiguous dialects with `ValueError` | yes | yes | no |
-| Strict and lax parsing | strict throws with line/column/record; lax recovers as documented | strict `ValueError`; lax variant allows ragged rows | lax only |
-| Lazy iteration from file / string | yes, generators; any stream resource | `LazyLaxCollection` over a file or buffer | line by line |
-| Row-major lists | yes | yes | yes |
-| Associative rows / header handling | yes | not in the proposed API | no |
-| Column-major output, per-column casts | yes | not in the proposed API | no |
-| Quoting modes (ALL, NONNUMERIC, NONE) | yes | not in the proposed API (minimal enclosure) | `fputcsv` only encloses as needed |
-| BOM on read / write, `skipInitialSpace`, presets | yes | not in the proposed API | no |
-| Writes to a file / any stream / php://output | yes, buffered | file or string | `fputcsv` per row |
-| Round trip guaranteed for string rows | yes (tested) | designed to | no |
-| Speed | 7-10x `fgetcsv()` on plain data (see below) | not measured here; native code should be faster | baseline, ~13 MB/s |
-
-## Benchmarks
-
-PHP 8.5.12, Linux 6.8, Intel Xeon E5-2697 v3 @ 2.6 GHz. 200 000 rows x 8 columns, generated by `bench/bench.php`
-(best of 3 runs; includes building the complete result array unless stated). "plain" has no quotes (14.0 MB);
-"messy" has quoted fields, doubled quotes, embedded newlines and commas in 1 of 5 fields, so 83% of lines contain a quote (16.5 MB).
-
-| Reading | plain, no JIT | plain, tracing JIT | messy, no JIT | messy, tracing JIT |
-|---|---:|---:|---:|---:|
-| `fgetcsv()` loop | 1072 ms (13.0 MB/s) | 1067 ms (13.1) | 1305 ms (12.7) | 1297 ms (12.7) |
-| `str_getcsv()` per line | 1075 ms (13.0) | 1066 ms (13.1) | n/a (embedded newlines) | n/a |
-| `Reader` rows, `toArray()` | 146 ms (95.6 MB/s), **7.3x** | 115 ms (121.7), **9.3x** | 628 ms (26.3), **2.1x** | 449 ms (36.8), **2.9x** |
-| `Reader` rows, lazy `foreach` | 133 ms (105.5), 8.1x | 100 ms (139.3), 10.6x | 469 ms (35.2), 2.8x | 267 ms (62.0), 4.9x |
-| `Reader` strict, `toArray()` | 145 ms, 7.4x | 114 ms, 9.4x | 675 ms, 1.9x | 490 ms, 2.7x |
-| `Reader` associative rows | 208 ms, 5.2x | 173 ms, 6.2x | 730 ms, 1.8x | 549 ms, 2.4x |
-| `Reader` columns | 259 ms, 4.1x | 230 ms, 4.6x | 795 ms, 1.6x | 601 ms, 2.2x |
-
-| Writing 200 000 rows to a file | plain, no JIT | plain, JIT | messy, no JIT | messy, JIT |
-|---|---:|---:|---:|---:|
-| `fputcsv()` loop | 1129 ms | 1095 ms | 1290 ms | 1276 ms |
-| `Writer::toFile` | 403 ms, 2.8x | 206 ms, 5.3x | 587 ms, 2.2x | 400 ms, 3.2x |
-
-JIT here means `php -d opcache.enable_cli=1 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M`; "no JIT" is stock CLI with opcache off.
-`toArray()` is slower than lazy iteration on the messy data because building 200 000 arrays triggers PHP's cycle collector; `fgetcsv()` pays the same.
-
-How it is fast, and where it stops being fast: a line that contains no enclosure is split with a single `explode()`; lines with
-quotes go through a per-field scanner (`strcspn()` for plain fields, `strpos()` for quoted ones). The more quoted fields,
-the less of the work is done in one C call, hence 7x on plain data and 2x on this deliberately heavy messy data. Real-world files with a few
-quoted columns land in between. I have not benchmarked against a build of the proposed ext/csv; a native
-implementation should be faster than any userspace code, and what this shows is the distance to `fgetcsv()`, not to it.
-
-Reproduce:
+Command (starts the benchmark with the tracing JIT, then without it, and checks that the JIT compiled something):
 
 ```
 composer install
-php bench/bench.php                                   # data is generated in bench/data/ (git-ignored)
-php -d opcache.enable_cli=1 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M bench/bench.php
-php bench/bench.php --rows=50000 --runs=1             # quick run
+php bench/run.php                      # --rows=50000 --runs=3 for a quick run
 ```
+
+which runs `php -d opcache.enable_cli=1 -d opcache.file_update_protection=0 -d opcache.jit_buffer_size=128M -d opcache.jit=1255 bench/bench.php`
+and the same with `-d opcache.jit_buffer_size=0` (opcache on, JIT off).
+
+**With the tracing JIT** (`opcache.jit=1255`)
+
+| Decoding | plain ms (MB/s) | vs `fgetcsv` | messy ms (MB/s) | vs `fgetcsv` |
+|---|---:|---:|---:|---:|
+| `fgetcsv()` loop, collect | 1102 (13) | 1.0x | 1172 (14) | 1.0x |
+| `str_getcsv()` per line, collect | 1084 (13) | 1.0x | n/a (embedded newlines) | |
+| `Decoder` (Lax), collect | 89 (157) | 12.4x | 256 (65) | 4.6x |
+| `Decoder` (Lax), stream | 98 (143) | 11.3x | 252 (66) | 4.7x |
+| `Decoder` (Strict), stream | 106 (132) | 10.4x | 258 (64) | 4.5x |
+| `Decoder` (Lax, `header: true`), stream | 160 (87) | 6.9x | 323 (51) | 3.6x |
+
+| Encoding to `php://memory` | plain ms | messy ms |
+|---|---:|---:|
+| `fputcsv()` loop | 106 | 103 |
+| `Encoder` + `fwrite()` | 154 (0.69x of `fputcsv` speed) | 253 (0.41x) |
+
+**Without the JIT** (opcache on, `opcache.jit_buffer_size=0`)
+
+| Decoding | plain ms (MB/s) | vs `fgetcsv` | messy ms (MB/s) | vs `fgetcsv` |
+|---|---:|---:|---:|---:|
+| `fgetcsv()` loop, collect | 1064 (13) | 1.0x | 1133 (15) | 1.0x |
+| `str_getcsv()` per line, collect | 1079 (13) | 1.0x | n/a | |
+| `Decoder` (Lax), collect | 116 (120) | 9.2x | 375 (44) | 3.0x |
+| `Decoder` (Lax), stream | 124 (112) | 8.6x | 383 (43) | 3.0x |
+| `Decoder` (Strict), stream | 133 (105) | 8.0x | 426 (39) | 2.7x |
+| `Decoder` (Lax, `header: true`), stream | 189 (74) | 5.6x | 465 (36) | 2.4x |
+
+| Encoding to `php://memory` | plain ms | messy ms |
+|---|---:|---:|
+| `fputcsv()` loop | 100 | 119 |
+| `Encoder` + `fwrite()` | 178 (0.56x) | 362 (0.33x) |
+
+Without the JIT the numbers differ: the decoder is 25-45% slower than with it, while `fgetcsv()` and `fputcsv()`, which are native code, do not change.
+Your numbers will depend on the PHP build, the CPU and the data; the machine this was measured on was not idle, so differences of 10-15% between runs are noise.
+Timings include building the result arrays, so the cycle collector is part of them (it is why "messy" is slower than its extra bytes suggest).
+`fputcsv()` also encloses fields that contain a space or a tab, so its output is slightly larger than the `Encoder`'s.
+
+Why the decoder is fast, and where it stops being fast: a line that contains no enclosure is split with a single `explode()`; lines with quotes go through a
+per-field scanner (`strcspn()` for plain fields, `strpos()` for quoted ones). The more quoted fields, the less of the work happens in one C call.
+Headers cost an `array_combine()` per record.
+
 
 ## Limitations
 
-* Pure PHP: it will not match native code.
-* Quote-heavy data is 2-3x faster than `fgetcsv()`, not 8x (see above).
-* A single record is held in memory whole (a 100 MB quoted field needs a 100 MB buffer).
-* Blank lines are skipped, so a single-column file with genuinely empty values must quote them (`""`), as `Writer` does. A row with no fields cannot be represented.
-* The "lax" semantics are this library's own (documented above); input that is malformed in other ways may be read differently by other parsers.
-* Bytes in, bytes out: no charset conversion. UTF-8 is assumed only for the BOM and for the `column` in error positions.
+* Pure PHP: it will not match native code, and I have not measured it against a build of the proposed ext/csv.
+* Quote-heavy data decodes 2-5x faster than `fgetcsv()`, not 10x: the more quoted fields, the less work is done in one C call.
+* The Encoder is slower than `fputcsv()` (see the table); the Decoder is where the time was spent.
+* Bytes in, bytes out: no charset conversion. UTF-8 is assumed only for the BOM and for `column` in error positions.
 * No comment lines, no escape character, no formula-injection protection (prefixing `=`, `+`, `-`, `@` is up to you).
-* Reading from non-blocking streams is not supported (an empty read that is not EOF would spin).
-* An enclosure that overlaps itself (`||`) is rejected; a delimiter/terminator that does is accepted and matched left to right.
+* Streams are the caller's job; reading from non-blocking streams needs the caller to skip empty reads.
 
 ## Tests
 
@@ -264,10 +234,10 @@ composer install
 vendor/bin/phpunit
 ```
 
-The suite covers RFC 4180 cases, every strict-mode error with its line/column/record, lax recovery, chunk-boundary
-equivalence for chunk sizes 1-17 (strings and streams, multibyte tokens split mid-character), a fuzz test against a
-deliberately naive byte-by-byte reference parser (`tests/ReferenceParser.php`) in nine dialects, a seeded round-trip property test, comparison with
-`fgetcsv()` on generated samples in `tests/fixtures`, output shapes, and writing to `php://memory` and `php://output`.
+RFC 4180 cases, every strict-mode error with its line, column and record, lax recovery, header and null handling, the BOM,
+every cut of the test documents into two chunks and every chunk size from 1 to 17 (plus random chunkings, and three-way cuts of a multibyte
+document), a fuzz test against a deliberately naive byte-by-byte reference parser (`tests/ReferenceParser.php`) in nine formats,
+seeded round-trip property tests, comparison with `fgetcsv()` on generated samples in `tests/fixtures`, and the encoder's type conversions.
 CI runs PHP 8.2-8.5 with deprecations and notices as failures.
 
 ## License
