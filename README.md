@@ -94,7 +94,7 @@ final class Decoder
     public function finish(): array;                       // end of input: last record, validation; resets the decoder
 }
 
-final class ParseException extends \RuntimeException {}    // public readonly int $lineNumber, $column, $record
+final class ParseException extends \UnexpectedValueException {}    // public readonly int $lineNumber, $column, $record
 ```
 
 ### Format
@@ -221,6 +221,12 @@ Why the decoder is fast, and where it stops being fast: a line that contains no 
 per-field scanner (`strcspn()` for plain fields, `strpos()` for quoted ones). The more quoted fields, the less of the work happens in one C call.
 Headers cost an `array_combine()` per record.
 
+
+## Errors
+
+Misuse by the caller (an empty or ambiguous `Format`, duplicate header names, a row whose keys do not fit the header) throws PHP's own `\ValueError`, and a field of an unsupported type throws `\TypeError`; there are no custom classes for these.
+Bad input data throws `\UnexpectedValueException` or a subclass: `ParseException` from the Decoder (in `Mode::Strict`), and a plain `\UnexpectedValueException` from the Encoder when `Quoting::Never` is set and a field would need quoting.
+`catch (\UnexpectedValueException)` therefore catches a data error from any charm package. Since 0.1.1 `ParseException` extends `\UnexpectedValueException`, which is a `\RuntimeException`, so an existing `catch (\RuntimeException)` keeps working.
 
 ## Limitations
 

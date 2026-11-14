@@ -175,6 +175,14 @@ final class DecoderTest extends TestCase
         }
     }
 
+    public function testParseExceptionIsAnUnexpectedValueException(): void
+    {
+        $e = new ParseException('bad', 2, 3, 4);
+        $this->assertInstanceOf(\UnexpectedValueException::class, $e);
+        $this->assertInstanceOf(\RuntimeException::class, $e);
+        $this->assertSame([2, 3, 4], [$e->lineNumber, $e->column, $e->record]);
+    }
+
     public function testFinishWithoutInput(): void
     {
         $this->assertSame([], (new Decoder())->finish());
